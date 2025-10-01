@@ -6,39 +6,40 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Modal app
-app = modal.App(name="docling-serve")
+# Modal app configuration
+app = modal.App(name="docling-serve-gpu")
 
 # Configuration constants
-#docling image cpu lighter than GPU
-DOCLING_IMAGE = "ghcr.io/docling-project/docling-serve-cpu:latest"
+# CU126 GPU image from github container registry
+DOCLING_IMAGE = "ghcr.io/docling-project/docling-serve-cu126:latest"
 PORT = 5001
 ARTIFACTS_PATH = "/artifacts"
-STARTUP_TIMEOUT = 300  # Seconds for model initialization
+STARTUP_TIMEOUT = 600
 
-# Persistent volume for model artifacts 
+# Persistent volume for model artifacts to cache downloads across deployments
 artifacts_vol = modal.Volume.from_name("docling-artifacts", create_if_missing=True)
 
-# Build Modal image with environment variables
 image = (
     modal.Image.from_registry(DOCLING_IMAGE)
     .env({
         "DOCLING_SERVE_ENABLE_UI": "1",  # Enable Gradio UI
-        "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,  
-        "OMP_NUM_THREADS": "4",  
+        "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,  # Path for caching artifacts
     })
 )
 
 @app.function(
     image=image,
     volumes={ARTIFACTS_PATH: artifacts_vol},
-    timeout=STARTUP_TIMEOUT
+    timeout=STARTUP_TIMEOUT,
+    # GPU A100 for performance
+    gpu="A100",
 )
-@modal.web_server(PORT, startup_timeout=STARTUP_TIMEOUT, label="docling")
+@modal.web_server(PORT, startup_timeout=STARTUP_TIMEOUT, label="docling-gpu")
 def start_docling_server():
     logger.info("Starting Docling server on port %d", PORT)
     
-    cmd = f"docling-serve run --host 0.0.0.0 --port {PORT} --enable-ui"
+    # Command to run the server
+    cmd = f"docling-serve run --host 0.0.0.0 --port {PORT} --enable-ui" 
     try:
         subprocess.Popen(cmd, shell=True)
         logger.info("Docling server process started")
@@ -49,4 +50,4 @@ def start_docling_server():
 
 if __name__ == "__main__":
     logger.info("Deploying to Modal")
-    app.deploy()
+    app.deploy() 

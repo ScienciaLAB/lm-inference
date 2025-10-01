@@ -1,1 +1,2 @@
 modal
+docling-serve
