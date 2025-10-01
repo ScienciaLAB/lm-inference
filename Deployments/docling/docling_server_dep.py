@@ -1,5 +1,4 @@
 import modal
-import os
 import subprocess
 import logging
 
@@ -12,7 +11,7 @@ app = modal.App(name="docling-serve")
 
 # Configuration constants
 #docling image cpu lighter than GPU
-DOCING_IMAGE = "ghcr.io/docling-project/docling-serve-cpu:latest"
+DOCLING_IMAGE = "ghcr.io/docling-project/docling-serve-cpu:latest"
 PORT = 5001
 ARTIFACTS_PATH = "/artifacts"
 STARTUP_TIMEOUT = 300  # Seconds for model initialization
@@ -22,7 +21,7 @@ artifacts_vol = modal.Volume.from_name("docling-artifacts", create_if_missing=Tr
 
 # Build Modal image with environment variables
 image = (
-    modal.Image.from_registry(DOCING_IMAGE)
+    modal.Image.from_registry(DOCLING_IMAGE)
     .env({
         "DOCLING_SERVE_ENABLE_UI": "1",  # Enable Gradio UI
         "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,  
@@ -37,7 +36,6 @@ image = (
 )
 @modal.web_server(PORT, startup_timeout=STARTUP_TIMEOUT, label="docling")
 def start_docling_server():
-    """Start the Docling server with minimal error handling."""
     logger.info("Starting Docling server on port %d", PORT)
     
     cmd = f"docling-serve run --host 0.0.0.0 --port {PORT} --enable-ui"
