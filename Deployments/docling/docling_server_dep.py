@@ -48,6 +48,3 @@ def start_docling_server():
         logger.error("Failed to start server: %s", str(e))
         raise
 
-if __name__ == "__main__":
-    logger.info("Deploying to Modal")
-    app.deploy() 
