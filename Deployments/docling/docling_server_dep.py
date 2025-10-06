@@ -22,7 +22,7 @@ artifacts_vol = modal.Volume.from_name("docling-artifacts", create_if_missing=Tr
 image = (
     modal.Image.from_registry(DOCLING_IMAGE)
     .env({
-        "DOCLING_SERVE_ENABLE_UI": "1",  # Enable Gradio UI
+        "DOCLING_SERVE_ENABLE_UI": "0",  
         "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,  # Path for caching artifacts
     })
 )
@@ -32,14 +32,14 @@ image = (
     volumes={ARTIFACTS_PATH: artifacts_vol},
     timeout=STARTUP_TIMEOUT,
     # GPU A100 for performance
-    gpu="A100",
-)
+    gpu="A10",
+scaledown_window=600)
 @modal.web_server(PORT, startup_timeout=STARTUP_TIMEOUT, label="docling-gpu")
 def start_docling_server():
     logger.info("Starting Docling server on port %d", PORT)
     
     # Command to run the server
-    cmd = f"docling-serve run --host 0.0.0.0 --port {PORT} --enable-ui" 
+    cmd = f"docling-serve run --host 0.0.0.0 --port {PORT}" 
     try:
         subprocess.Popen(cmd, shell=True)
         logger.info("Docling server process started")
