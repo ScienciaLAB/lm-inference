@@ -1,66 +1,23 @@
-# Docline deployment
+# Docling Deployment
 
-- **deployments/**: Contains subfolders for each deployment (e.g., `docling/` with scripts like `docling_serve.py`).
+This directory contains the Modal deployment configuration for the Docling document processing service.
 
-## Deployment
+## Overview
 
-The Docling server is deployed on [Modal](https://modal.com) and accessible here: [Docling on Modal](https://sana-khamaassi--docling-gpu.modal.run/ui/)
+Docling is deployed on [Modal](https://modal.com) with GPU acceleration for high-performance document processing, including OCR, table extraction, image analysis, and more.
 
-# Docling Serve – Testing with `curl`
+**Deployment URL:** https://sana-khamaassi--docling-gpu.modal.run
 
-This section shows how to test the deployed Docling Serve instance using `curl`.  
-We focus on converting **documents from a URL** or a **local file**, and requesting results in **JSON** or **Markdown** format.
-The deployment URL on Modal :
+## API Usage
 
+The deployment provides REST endpoints for document conversion. Below are common usage examples.
+
+### Base URL
 ```
 https://sana-khamaassi--docling-gpu.modal.run
 ```
 
----
-
-The usage of the API is avalaible here
-(Source: [Docling Serve GitHub usage.md](https://github.com/docling-project/docling-serve/blob/main/docs/usage.md))
-
-## Full CURL request
-
-curl -X 'POST' \
- 'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
- -H 'accept: application/json' \
- -H 'Content-Type: application/json' \
- -d '{
-"options": {
-"from_formats": [
-"docx",
-"pptx",
-"html",
-"image",
-"pdf",
-"asciidoc",
-"md",
-"xlsx"
-],
-"to_formats": ["md", "json", "html", "text", "doctags"],
-"image_export_mode": "placeholder",
-"do_ocr": true,
-"force_ocr": false,
-"ocr_engine": "easyocr",
-"ocr_lang": [
-"fr",
-"de",
-"es",
-"en"
-],
-"pdf_backend": "dlparse_v2",
-"table_mode": "fast",
-"abort_on_error": false,
-"do_table_structure": true,
-"include_images": true,
-"images_scale": 2
-},
-"http_sources": [{"url": "https://arxiv.org/pdf/2206.01062"}]
-}'
-
-## 1. Convert a Document from a URL – JSON Output
+### 1. Convert Document from URL (JSON Output)
 
 ```bash
 curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source" \
@@ -79,14 +36,7 @@ curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source" \
   }'
 ```
 
-
-**Documentation Reference:**  
-From Docling Serve README:  
-(Source: [Docling Serve GitHub](https://github.com/docling-project/docling-serve))
-
----
-
-## 2. Convert a Document from a URL – Markdown Output
+### 2. Convert Document from URL (Markdown Output)
 
 ```bash
 curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source" \
@@ -105,59 +55,62 @@ curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source" \
   }'
 ```
 
----
+### 3. Convert Local File (JSON Output)
 
-## 3. Convert a Local File – JSON Output
-
+```bash
 curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
   -H "accept: application/json" \
-  -F "files=@/Users/mandamac1/Downloads/scie1.pdf" \
-  -F "to_formats=json"
--o "output_path/output.md"
-
-
-
----
-
-## 4. Convert a Local File – Markdown Output
-
-curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
-  -H "accept: application/json" \
-  -F "files=@file_path" \
-  -F "to_formats=md" \
-  -o "output_path/output.md"
-
-
----
-
-***********Notes*****
-
-We can run docling locally through docling cli or as a python package  https://github.com/docling-project/docling 
-
-*****************Granite docling ****************************
-First : I tried running the curl commands with pipeline tags not working because we deployed docling-serve not docling
-curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
-  -H "accept: application/json" \
-  -F "files=@/Users/mandamac1/Downloads/scie1.pdf" \
+  -F "files=@/path/to/your/document.pdf" \
   -F "to_formats=json" \
-  -F "pipeline=vlm" \
-  -F "vlm_model=granite_docling" \
-  -o "/Users/mandamac1/Downloads/output_granite.md"
+  -o "output.json"
+```
 
+### 4. Convert Local File (Markdown Output)
 
+```bash
+curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
+  -H "accept: application/json" \
+  -F "files=@/path/to/your/document.pdf" \
+  -F "to_formats=md" \
+  -o "output.md"
+```
+
+## Advanced Configuration
+
+### Full Options Example
+
+```bash
 curl -X 'POST' \
   'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
   -H 'accept: application/json' \
   -H 'Content-Type: application/json' \
   -d '{
-    "http_sources": [{"url": "https://arxiv.org/pdf/2206.01062"}],
     "options": {
-      "pipeline": "vlm",
-      "vlm_model": "granite_docling"
-    }
+      "from_formats": [
+        "docx", "pptx", "html", "image", "pdf", "asciidoc", "md", "xlsx"
+      ],
+      "to_formats": ["md", "json", "html", "text", "doctags"],
+      "image_export_mode": "placeholder",
+      "do_ocr": true,
+      "force_ocr": false,
+      "ocr_engine": "easyocr",
+      "ocr_lang": ["fr", "de", "es", "en"],
+      "pdf_backend": "dlparse_v2",
+      "table_mode": "fast",
+      "abort_on_error": false,
+      "do_table_structure": true,
+      "include_images": true,
+      "images_scale": 2
+    },
+    "http_sources": [{"url": "https://arxiv.org/pdf/2206.01062"}]
   }'
+```
 
-Second: i tried to install granite from hugging face so it will be avaoilable on the image not working
+### Granite Docling Pipeline
+
+The deployment is configured to use the Granite Docling model for enhanced document understanding:
+
+```bash
 curl -X 'POST' \
   'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
   -H 'accept: application/json' \
@@ -167,21 +120,62 @@ curl -X 'POST' \
     "options": {
       "do_picture_description": true,
       "do_table_structure": true,
-      "vlm_model": "granite_docling"
+      "pipeline": "granitedocling"
     }
   }'
+```
 
-Third: just tried to run the same curl commands but adding options variable on the CURL COMMANDS
+## Deployment Details
 
-  curl -X 'POST' \
-  'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "sources": [{"kind": "http", "url": "https://arxiv.org/pdf/2501.17887"}],
-    "options": {
-      "do_picture_description": true,
-      "do_table_structure": true
-    }
-  }'
-  (Source: [Docling Serve GitHub usage.md](https://github.com/docling-project/docling-serve/blob/main/docs/usage.md))
+### Configuration
+- **GPU**: A10 with 16GB memory
+- **Timeout**: 10 minutes startup, 5 minutes scale-down
+- **Max containers**: 2
+- **Concurrency**: 4 max inputs
+- **Models**: Pre-downloaded for fast startup
+
+### Supported Formats
+- **Input**: PDF, DOCX, PPTX, HTML, Images, AsciiDoc, Markdown, XLSX
+- **Output**: JSON, Markdown, HTML, Text, DocTags
+- **OCR**: EasyOCR with multi-language support (EN, FR, DE, ES)
+
+### Features
+- **OCR**: Text extraction from images and scanned PDFs
+- **Table Extraction**: Automatic table detection and structure analysis
+- **Image Analysis**: Picture description and classification
+- **Layout Analysis**: Document structure understanding
+- **Granite Model**: Enhanced AI-powered document processing
+
+## Development
+
+### Local Development
+
+For local development, you can run Docling directly:
+
+```bash
+# Using CLI
+pip install docling
+docling convert document.pdf --output result.md
+
+# Using Python
+from docling.document_converter import DocumentConverter
+converter = DocumentConverter()
+result = converter.convert("document.pdf")
+```
+
+**Source:** [Docling Project GitHub](https://github.com/docling-project/docling)
+
+### Deployment
+
+To deploy or update the service:
+
+```bash
+modal deploy docling_server_dep.py
+```
+
+## Troubleshooting
+
+- **Timeout issues**: Increase `STARTUP_TIMEOUT` for large documents
+- **Memory issues**: Check document size and complexity
+- **Model loading**: Models are pre-downloaded during deployment
+- **GPU availability**: Service may need time to warm up on first request
