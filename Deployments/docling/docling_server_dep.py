@@ -1,6 +1,9 @@
+import os
 import modal
 import subprocess
 import logging
+from dotenv import load_dotenv
+load_dotenv()
 
 # Basic logging for better debugging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(message)s")
@@ -20,10 +23,17 @@ STARTUP_TIMEOUT = 600
 artifacts_vol = modal.Volume.from_name("docling-artifacts", create_if_missing=True)
 
 image = (
-    modal.Image.from_registry(DOCLING_IMAGE)
+    modal.Image.from_registry(DOCLING_IMAGE).run_commands(
+        # Pre-download Granite-Docling
+        "python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id=\"ibm-granite/granite-docling-258M\", local_dir=\"/artifacts/models/ibm-granite/granite-docling-258M\")'"
+    )
     .env({
-        "DOCLING_SERVE_ENABLE_UI": "0",  
-        "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,  # Path for caching artifacts
+        "DOCLING_SERVE_ENABLE_UI": "0",
+        "DOCLING_ARTIFACTS_PATH": ARTIFACTS_PATH,
+        #"DOCLING_MODEL_PROVIDER": "huggingface",
+        #"DOCLING_MODEL_NAME": "ibm-granite/granite-3.1-vlm",
+        #"HUGGINGFACE_TOKEN": os.getenv("HUGG_TOKEN"),
+
     })
 )
 
@@ -31,7 +41,7 @@ image = (
     image=image,
     volumes={ARTIFACTS_PATH: artifacts_vol},
     timeout=STARTUP_TIMEOUT,
-    # GPU A100 for performance
+    # GPU A10 for performance
     gpu="A10",
 scaledown_window=600)
 @modal.web_server(PORT, startup_timeout=STARTUP_TIMEOUT, label="docling-gpu")

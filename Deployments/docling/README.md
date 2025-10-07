@@ -111,9 +111,9 @@ curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source" \
 
 curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
   -H "accept: application/json" \
-  -F "files=@/file_path" \
+  -F "files=@/Users/mandamac1/Downloads/scie1.pdf" \
   -F "to_formats=json"
-  -o "output_path/output.json"
+-o "output_path/output.md"
 
 
 
@@ -133,3 +133,55 @@ curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
 ***********Notes*****
 
 We can run docling locally through docling cli or as a python package  https://github.com/docling-project/docling 
+
+*****************Granite docling ****************************
+First : I tried running the curl commands with pipeline tags not working because we deployed docling-serve not docling
+curl -X POST "https://sana-khamaassi--docling-gpu.modal.run/v1/convert/file" \
+  -H "accept: application/json" \
+  -F "files=@/Users/mandamac1/Downloads/scie1.pdf" \
+  -F "to_formats=json" \
+  -F "pipeline=vlm" \
+  -F "vlm_model=granite_docling" \
+  -o "/Users/mandamac1/Downloads/output_granite.md"
+
+
+curl -X 'POST' \
+  'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "http_sources": [{"url": "https://arxiv.org/pdf/2206.01062"}],
+    "options": {
+      "pipeline": "vlm",
+      "vlm_model": "granite_docling"
+    }
+  }'
+
+Second: i tried to install granite from hugging face so it will be avaoilable on the image not working
+curl -X 'POST' \
+  'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sources": [{"kind": "http", "url": "https://arxiv.org/pdf/2501.17887"}],
+    "options": {
+      "do_picture_description": true,
+      "do_table_structure": true,
+      "vlm_model": "granite_docling"
+    }
+  }'
+
+Third: just tried to run the same curl commands but adding options variable on the CURL COMMANDS
+
+  curl -X 'POST' \
+  'https://sana-khamaassi--docling-gpu.modal.run/v1/convert/source' \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "sources": [{"kind": "http", "url": "https://arxiv.org/pdf/2501.17887"}],
+    "options": {
+      "do_picture_description": true,
+      "do_table_structure": true
+    }
+  }'
+  (Source: [Docling Serve GitHub usage.md](https://github.com/docling-project/docling-serve/blob/main/docs/usage.md))
