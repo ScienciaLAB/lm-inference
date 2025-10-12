@@ -1,3 +1,6 @@
+# General dependencies
 modal
-docling-serve
 python-dotenv
+
+# Docling dependencies
+docling-serve
