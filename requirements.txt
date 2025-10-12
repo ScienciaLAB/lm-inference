@@ -1,0 +1,3 @@
+modal
+docling-serve
+python-dotenv
