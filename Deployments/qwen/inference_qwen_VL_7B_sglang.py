@@ -7,42 +7,52 @@ import time
 from pathlib import Path
 from typing import BinaryIO, List, Union
 from uuid import uuid4
-
 import modal
-from fastapi import UploadFile
+from fastapi import UploadFile, File, Form
 from openai import AsyncOpenAI
 import fitz  # PyMuPDF
+from pydantic import BaseModel
 
 cuda_version = "12.8.0"  # should be no greater than host CUDA version
 flavor = "devel"  #  includes full CUDA toolkit
 operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
-
+vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+class PDFExtractionResponse(BaseModel):
+    pages: dict[int, str]
+    total_pages: int
+    processing_time: float
 image = (
     modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
-    .pip_install(
-        "vllm>=0.4.0",
-        "huggingface_hub[hf_transfer]==0.26.2",
-        "flashinfer-python==0.2.0.post2",  # pinning, very unstable
-        "pillow",  # Required for image processing in VL models
-        "opencv-python",  # Additional image processing support
-        "PyMuPDF",  # PDF processing
-        "transformers==4.54.1",
+    .apt_install("libnuma-dev")  
+       .pip_install(
+        # Core packages first
+        "torch>=2.7.0,<2.8",
         "numpy<2",
-        "fastapi[standard]==0.115.4",
-        "pydantic==2.9.2",
-        "requests==2.32.3",
-        "starlette==0.41.2",
-        "torch==2.7.1",
-        "sglang[all]==0.4.10.post2",
-        "sgl-kernel==0.2.8",
-        "hf-xet==1.1.5",
-        extra_index_url="https://flashinfer.ai/whl/cu124/torch2.5",
+        extra_index_url="https://flashinfer.ai/whl/cu124/torch2.7",
+    )
+    .pip_install(
+        # SGLang with only needed extras (not [all])
+        "sglang[srt]>=0.4.10,<0.5.0",  # [srt] only, not [all]
+        "sgl-kernel>=0.2.8,<0.3",
+    )
+    .pip_install(
+        # Application dependencies
+        "transformers>=4.54.0,<4.60.0",
+        "huggingface_hub>=0.35.0,<1.0",
+        "openai",
+        "pillow",
+        "opencv-python",
+        "PyMuPDF",
+        "fastapi[standard]>=0.115,<0.120",
+        "pydantic>=2.9.2,<2.11",
+        "requests>=2.32,<3.0",
+        "hf-xet>=1.1.5,<1.2",
     )
     .env({
-        "HF_HUB_ENABLE_HF_TRANSFER": "1",  # faster model transfers
-        "TOKENIZERS_PARALLELISM": "false",  # Avoid tokenizer warnings
-        "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"  # Optimize CUDA memory
+        "HF_HUB_ENABLE_HF_TRANSFER": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
     })
 )
 
@@ -61,9 +71,10 @@ MODEL_CONFIG = {
     "video_limit": 0,  # No video support
 }
 
-MODEL_VOL_PATH = Path()
+MODEL_VOL_PATH = "/root/.cache/sgl"   # must be absolute!
 MODEL_VOL = modal.Volume.from_name("sgl-cache", create_if_missing=True)
 volumes = {MODEL_VOL_PATH: MODEL_VOL}
+
 FAST_BOOT = True
 
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
@@ -88,13 +99,14 @@ SWAP_SPACE = 4  # GB of swap space
 MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
 MODEL_REVISION = "cc594898137f460bfe9f0759e9844b3ce807cfb5"
 TOKENIZER_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"
+
 MODEL_CHAT_TEMPLATE = "qwen2-vl"
 
 
 @app.cls(
     gpu=GPU_CONFIG,
     timeout=20 * MINUTES,
-    container_idle_timeout=20 * MINUTES,
+    scaledown_window=20 * MINUTES, 
     image=image,
     volumes=volumes,
 )
@@ -115,8 +127,8 @@ class Model:
         )
         sgl.set_default_backend(self.runtime)
 
-    @modal.web_endpoint(method="POST", docs=True)
-    def generate(self, question: str, image: Union[Path, str, BinaryIO]):
+    @modal.fastapi_endpoint(method="POST", docs=True)
+    async def generate(self, question: str = Form(...),image: UploadFile = File(...)) -> dict:
         from pathlib import Path
         import sglang as sgl
 
@@ -124,8 +136,10 @@ class Model:
         request_id = uuid4()
         print(f"Generating response to request {request_id}")
 
-        image_path = Path(f"/tmp/{uuid4()}-{image_filename}")
-        image_path.write_bytes(response.content)
+        # Read uploaded file and save temporarily
+        image_bytes = await image.read()
+        image_path = Path(f"/tmp/{uuid4()}.png")
+        image_path.write_bytes(image_bytes)
 
         @sgl.function
         def image_qa(s, image_path, question):
@@ -137,15 +151,15 @@ class Model:
             question=question
         )
 
-        # show the question and image in the terminal for demonstration purposes
-        print(Colors.BOLD, Colors.GRAY, "Question: ", question, Colors.END, sep="")
-        terminal_image = from_file(image_path)
-        terminal_image.draw()
         print(
             f"request {request_id} completed in {round((time.monotonic_ns() - start) / 1e9, 2)} seconds"
         )
 
-        return state["answer"]
+        return {
+            "answer": state["answer"],
+            "request_id": str(request_id),
+            "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
+        }
 
     @modal.exit()  # what should a container do before it shuts down?
     def shutdown_runtime(self):
@@ -155,7 +169,7 @@ class Model:
 
 
 @app.function(
-    image=vllm_image,
+    image=image,
     memory=8000,  # Reduced memory since no GPU needed
     cpu=4,
     timeout=600,
@@ -236,11 +250,13 @@ async def call_vllm_with_openai_client_async(messages: list, base_url: str = Non
     # Default to localhost if no base_url provided
     if base_url is None:
         base_url = "http://localhost:8000/v1"
-    
+    # Use dummy key for local vLLM server if none provided
+    effective_api_key = api_key or os.environ.get("API_KEY", "dummy-key")
+
     # Initialize AsyncOpenAI client
     client = AsyncOpenAI(
         base_url=base_url,
-        api_key=api_key or os.environ.get("API_KEY", None)
+        api_key=effective_api_key 
     )
     
     try:
@@ -373,7 +389,7 @@ async def process_pages_async(pages: list, vllm_base_url: str, api_key: str, mod
 
 
 @app.function(
-    image=vllm_image,
+    image=image,
     memory=8000,
     cpu=4,
     timeout=600,
@@ -383,11 +399,8 @@ async def process_pages_async(pages: list, vllm_base_url: str, api_key: str, mod
     },
     secrets=[modal.Secret.from_name("document-qa-api-key")]
 )
-@modal.web_endpoint(method="POST")
-async def extract_pdf(pdf: UploadFile, dpi=150):
-    """
-    Web endpoint for PDF extraction using vLLM via OpenAI client with async processing.
-    """
+@modal.fastapi_endpoint(method="POST")
+async def extract_pdf(pdf: UploadFile = File(...),dpi: int = Form(150)) -> dict:  
     
     print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
     pdf_content = pdf.file.read()
@@ -399,7 +412,7 @@ async def extract_pdf(pdf: UploadFile, dpi=150):
         return {"error": pages["error"], "total_pages": 0, "extracted_text": []}
     
     # Process pages asynchronously with controlled concurrency
-    vllm_base_url = f"http://localhost:{VLLM_PORT}/v1"
+    vllm_base_url = "https://sana-khamaassi--qwen-2-5-vl-7b-instruct-sglang-model-generate.modal.run"
     api_key = os.environ.get("API_KEY")
     
     # Use async processing with concurrency limits
@@ -419,7 +432,7 @@ async def extract_pdf(pdf: UploadFile, dpi=150):
     }
     
     return result
-        
+    
 
 
 if __name__ == "__main__":
