@@ -160,7 +160,23 @@ class Model:
             "request_id": str(request_id),
             "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
         }
+    @modal.method()
+    def process_page_image(self, image_bytes: bytes, question: str = "Please extract and transcribe all text from this image. Provide the text in a clean, readable format.") -> str:
+        """Process a single image (as bytes) with the VL model."""
+        import sglang as sgl
+        from pathlib import Path
 
+        image_path = Path(f"/tmp/{uuid4()}.png")
+        image_path.write_bytes(image_bytes)
+
+        @sgl.function
+        def image_qa(s, img_path, q):
+            s += sgl.user(sgl.image(img_path) + q)
+            s += sgl.assistant(sgl.gen("answer"))
+
+        state = image_qa.run(str(image_path), question)
+        image_path.unlink(missing_ok=True)
+        return state["answer"]
     @modal.exit()  # what should a container do before it shuts down?
     def shutdown_runtime(self):
         self.runtime.shutdown()
@@ -400,39 +416,49 @@ async def process_pages_async(pages: list, vllm_base_url: str, api_key: str, mod
     secrets=[modal.Secret.from_name("document-qa-api-key")]
 )
 @modal.fastapi_endpoint(method="POST")
-async def extract_pdf(pdf: UploadFile = File(...),dpi: int = Form(150)) -> dict:  
-    
+async def extract_pdf(pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:  
     print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
-    pdf_content = pdf.file.read()
-    
-    # Call the PDF extraction function
+    pdf_content = await pdf.read()  # <-- async read!
+
+    # Extract pages as images (still done locally)
     pages = extract_pdf_pages.remote(pdf_content, dpi)
-    
+
     if "error" in pages:
         return {"error": pages["error"], "total_pages": 0, "extracted_text": []}
-    
-    # Process pages asynchronously with controlled concurrency
-    vllm_base_url = "https://sana-khamaassi--qwen-2-5-vl-7b-instruct-sglang-model-generate.modal.run"
-    api_key = os.environ.get("API_KEY")
-    
-    # Use async processing with concurrency limits
-    extracted_texts = await process_pages_async(
-        pages=pages,
-        vllm_base_url=vllm_base_url,
-        api_key=api_key,
-        model=MODEL_PATH
-    )
-    
-    result = {
+
+    # Now call the SGLang model for each page
+    model = Model()  # get a handle to the deployed class
+
+    results = []
+    for page in pages:
+        # Decode base64 back to bytes
+        image_bytes = base64.b64decode(page["image_base64"])
+        
+        # Call the model remotely
+        try:
+            text = model.process_page_image.remote(image_bytes)
+            results.append({
+                "page_number": page["page_num"] + 1,
+                "text": text,
+                "width": page["width"],
+                "height": page["height"]
+            })
+        except Exception as e:
+            results.append({
+                "page_number": page["page_num"] + 1,
+                "text": "",
+                "error": str(e),
+                "width": page["width"],
+                "height": page["height"]
+            })
+
+    return {
         "filename": pdf.filename,
         "total_pages": len(pages),
         "dpi": dpi,
-        "extracted_text": extracted_texts,
+        "extracted_text": results,
         "success": True
     }
-    
-    return result
-    
 
 
 if __name__ == "__main__":
