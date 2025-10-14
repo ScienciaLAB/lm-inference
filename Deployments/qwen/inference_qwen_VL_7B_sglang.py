@@ -8,20 +8,16 @@ from pathlib import Path
 from typing import BinaryIO, List, Union
 from uuid import uuid4
 import modal
-from fastapi import UploadFile, File, Form
+from fastapi import Body, HTTPException, UploadFile, File, Form
 from openai import AsyncOpenAI
 import fitz  # PyMuPDF
 from pydantic import BaseModel
-
 cuda_version = "12.8.0"  # should be no greater than host CUDA version
 flavor = "devel"  #  includes full CUDA toolkit
 operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
-class PDFExtractionResponse(BaseModel):
-    pages: dict[int, str]
-    total_pages: int
-    processing_time: float
+
 image = (
     modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
     .apt_install("libnuma-dev")  
@@ -38,6 +34,7 @@ image = (
     )
     .pip_install(
         # Application dependencies
+        "vllm>=0.4.0",
         "transformers>=4.54.0,<4.60.0",
         "huggingface_hub>=0.35.0,<1.0",
         "openai",
@@ -126,16 +123,14 @@ class Model:
             MODEL_CHAT_TEMPLATE
         )
         sgl.set_default_backend(self.runtime)
-
-    @modal.fastapi_endpoint(method="POST", docs=True)
+   
+    @modal.web_endpoint(method="POST", docs=True)
     async def generate(self, question: str = Form(...),image: UploadFile = File(...)) -> dict:
         from pathlib import Path
         import sglang as sgl
-
         start = time.monotonic_ns()
         request_id = uuid4()
         print(f"Generating response to request {request_id}")
-
         # Read uploaded file and save temporarily
         image_bytes = await image.read()
         image_path = Path(f"/tmp/{uuid4()}.png")
@@ -160,23 +155,7 @@ class Model:
             "request_id": str(request_id),
             "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
         }
-    @modal.method()
-    def process_page_image(self, image_bytes: bytes, question: str = "Please extract and transcribe all text from this image. Provide the text in a clean, readable format.") -> str:
-        """Process a single image (as bytes) with the VL model."""
-        import sglang as sgl
-        from pathlib import Path
 
-        image_path = Path(f"/tmp/{uuid4()}.png")
-        image_path.write_bytes(image_bytes)
-
-        @sgl.function
-        def image_qa(s, img_path, q):
-            s += sgl.user(sgl.image(img_path) + q)
-            s += sgl.assistant(sgl.gen("answer"))
-
-        state = image_qa.run(str(image_path), question)
-        image_path.unlink(missing_ok=True)
-        return state["answer"]
     @modal.exit()  # what should a container do before it shuts down?
     def shutdown_runtime(self):
         self.runtime.shutdown()
@@ -265,7 +244,7 @@ async def call_vllm_with_openai_client_async(messages: list, base_url: str = Non
     """
     # Default to localhost if no base_url provided
     if base_url is None:
-        base_url = "http://localhost:8000/v1"
+        base_url = "http://127.0.0.1:8000/v1"
     # Use dummy key for local vLLM server if none provided
     effective_api_key = api_key or os.environ.get("API_KEY", "dummy-key")
 
@@ -274,8 +253,8 @@ async def call_vllm_with_openai_client_async(messages: list, base_url: str = Non
         base_url=base_url,
         api_key=effective_api_key 
     )
-    
     try:
+        # here the problem
         # Call the chat completion endpoint asynchronously
         response = await client.chat.completions.create(
             model=model,
@@ -416,49 +395,39 @@ async def process_pages_async(pages: list, vllm_base_url: str, api_key: str, mod
     secrets=[modal.Secret.from_name("document-qa-api-key")]
 )
 @modal.fastapi_endpoint(method="POST")
-async def extract_pdf(pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:  
+async def extract_pdf(pdf: UploadFile = File(...),dpi: int = Form(150)) -> dict:  
+    
     print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
-    pdf_content = await pdf.read()  # <-- async read!
-
-    # Extract pages as images (still done locally)
+    pdf_content = pdf.file.read()
+    
+    # Call the PDF extraction function
     pages = extract_pdf_pages.remote(pdf_content, dpi)
-
+    
     if "error" in pages:
         return {"error": pages["error"], "total_pages": 0, "extracted_text": []}
-
-    # Now call the SGLang model for each page
-    model = Model()  # get a handle to the deployed class
-
-    results = []
-    for page in pages:
-        # Decode base64 back to bytes
-        image_bytes = base64.b64decode(page["image_base64"])
-        
-        # Call the model remotely
-        try:
-            text = model.process_page_image.remote(image_bytes)
-            results.append({
-                "page_number": page["page_num"] + 1,
-                "text": text,
-                "width": page["width"],
-                "height": page["height"]
-            })
-        except Exception as e:
-            results.append({
-                "page_number": page["page_num"] + 1,
-                "text": "",
-                "error": str(e),
-                "width": page["width"],
-                "height": page["height"]
-            })
-
-    return {
+    
+    # Process pages asynchronously with controlled concurrency
+    vllm_base_url = "https://sana-khamassi5678--qwen-2-5-vl-7b-instruct-sglang-model--3d79a3.modal.run"
+    api_key = os.environ.get("API_KEY")
+    
+    # Use async processing with concurrency limits
+    extracted_texts = await process_pages_async(
+        pages=pages,
+        vllm_base_url=vllm_base_url,
+        api_key=api_key,
+        model=MODEL_PATH
+    )
+    
+    result = {
         "filename": pdf.filename,
         "total_pages": len(pages),
         "dpi": dpi,
-        "extracted_text": results,
+        "extracted_text": extracted_texts,
         "success": True
     }
+    
+    return result
+    
 
 
 if __name__ == "__main__":
