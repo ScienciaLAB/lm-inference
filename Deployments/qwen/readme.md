@@ -9,4 +9,8 @@ curl -X POST \
   -H "Content-Type: multipart/form-data" \
   -F "pdf=@/Users/mandamac1/Downloads/gre.pdf" \
   -F "dpi=150" \
-  https://sana-khamassi5678--qwen-2-5-vl-7b-instruct-vllm-process--908916.modal.run
+  https://sana-khamassi5678--qwen-2-5-vl-7b-instruct-vllm-process--908916.modal.run 
+
+
+  PS : IN vllm script change 
+          endpoint_url = "https://sana-khamassi5678--qwen-2-5-vl-7b-instruct-vllm-vlmmmode-de606a.modal.run" with te model generated url 
