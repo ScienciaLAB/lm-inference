@@ -191,7 +191,7 @@ class DotsOCRService:
 
 shared_service = DotsOCRService()
 
-@app.function(gpu="A10G", timeout=00)  
+@app.function(gpu="A10G", timeout=1000)  
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
