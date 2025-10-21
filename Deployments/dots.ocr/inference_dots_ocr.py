@@ -43,7 +43,7 @@ image = (
 app = modal.App("dots-ocr-vllm-official-app", image=image)
 
 # Modal class to manage the vLLM server lifecycle
-@app.cls(gpu="A10G") 
+@app.cls(gpu="A10G",scaledown_window=300,min_containers=1)
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
@@ -191,7 +191,7 @@ class DotsOCRService:
 
 shared_service = DotsOCRService()
 
-@app.function(gpu="A10G", timeout=1000)  
+@app.function(gpu="A10G", timeout=1000 ,scaledown_window=300)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
