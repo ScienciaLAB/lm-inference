@@ -39,7 +39,5 @@ Each deployment folder includes:
 - `model_name_inference.py` — the main Modal entrypoint  
 - A `README.md` file containing example `curl` commands to interact with the deployed model
 
-### Run a deployment
-
 
 Maintained by [ScienciaLAB](https://www.sciencialab.com)
