@@ -40,8 +40,6 @@ Each deployment folder includes:
 - A `README.md` file containing example `curl` commands to interact with the deployed model
 
 ### Run a deployment
-```bash
-modal deploy Deployments/dots.ocr/modal_app.py
 
 
 Maintained by [ScienciaLAB](https://www.sciencialab.com)
