@@ -138,7 +138,7 @@ class Model:
             "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
         }
 
-    @modal.fastapi_endpoint(method="POST", label="extract-text", docs=True)
+    @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-text", docs=True)
     async def extract_text_from_image(self, image: UploadFile = File(...)) -> dict:
         from pathlib import Path
         import sglang as sgl
@@ -235,7 +235,7 @@ class Model:
                 "total_pages": 0
             }
 
-    @modal.fastapi_endpoint(method="POST", label="extract-pdf", docs=True)
+    @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
     async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:  
         print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
         
