@@ -5,8 +5,9 @@ import tempfile
 import os
 import time
 from pathlib import Path
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.responses import PlainTextResponse
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 VOLUME = modal.Volume.from_name("olmocr-v2-cache", create_if_missing=True)
 MODEL_CACHE = "/model_cache"
@@ -34,6 +35,8 @@ app = modal.App("olmocr-v2-inference")
     image=image,
     volumes={MODEL_CACHE: VOLUME},
     timeout=1200,
+    scaledown_window=300,
+    min_containers=1
 )
 class OlmOcrService:
     @modal.enter()
@@ -131,22 +134,27 @@ from fastapi.responses import PlainTextResponse
     gpu="A100-40GB",
     image=image,
     volumes={MODEL_CACHE: VOLUME},
-    timeout=1800)
-@modal.asgi_app()
-def olmocr_app():
-    web_app = FastAPI()
+    timeout=1800,  
+)
+@modal.fastapi_endpoint(method="POST")
+async def upload(request: Request):
+    try:
+        form = await request.form()
+        file = form.get("file")
+        if not isinstance(file, StarletteUploadFile):
+            raise HTTPException(status_code=400, detail="No valid 'file' uploaded")
 
-    @web_app.post("/upload", response_class=PlainTextResponse)
-    async def upload(file: UploadFile = File(...)):
-        if not file.filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
+        filename = file.filename or "unknown.pdf"
+        if not filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
             raise HTTPException(status_code=400, detail="Only PDF/PNG/JPG allowed")
 
         contents = await file.read()
-        try:
-            # Use .remote.aio for async call inside async endpoint
-            markdown = await service.convert.remote.aio(contents, file.filename)
-            return markdown
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
 
-    return web_app
+        # Call your Modal class method
+        markdown = await service.convert.remote.aio(contents, filename)
+
+        return PlainTextResponse(markdown)
+
+    except Exception as e:
+        print(f"Error in upload endpoint: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
