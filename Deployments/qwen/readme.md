@@ -1,17 +1,21 @@
 # cURL commands to query the deployed Modal service
 
+The script allow to deploy: 
+- Qwen-VLMM-3B: `qwen-3` deployment
+- Qwen-VLMM-25B: `qwen-25` deployment
+
 ## Single image analysis endpoint (VLMMModel.generate)
 
 ```shell
-curl -X POST "https://{your-app-name}--{}-generate.modal.run" \
+curl -X POST "https://{your-app-name}--{qwen-3|qwen-25}-generate.modal.run" \
   -H "Content-Type: multipart/form-data" \
   -F "question=Extract the text of this formula in Latex format" \
   -F "image=@/path/to/your/image.png"
 ```
 
-## Multi-page document structure extraction endpoint (VLMMModel.extract_document_structure)
+## Multi-page document structure extraction endpoint
 ```shell 
-curl -X POST "https://{your-app-name}--{}-extract-document-structure.modal.run" \
+curl -X POST "https://{your-app-name}--{qwen-3|qwen-25}-extract-pdf.modal.run" \
   -H "Content-Type: application/json" \
   -d '{
     "pages": [
@@ -36,7 +40,7 @@ curl -X POST "https://{your-app-name}--{}-extract-document-structure.modal.run" 
 ## Main PDF document processing endpoint (process_pdf_document_structure)
 
 ```shell
-curl -X POST "https://{your-app-name}--{gwen-25|gwen-3}process-pdf-document-structure.modal.run" \
+curl -X POST "https://{your-app-name}--{qwen-25|qwen-3}-extract-pdf.modal.run" \
   -H "Content-Type: multipart/form-data" \
   -F "pdf=@/path/to/your/document.pdf" \
   -F "dpi=150"
