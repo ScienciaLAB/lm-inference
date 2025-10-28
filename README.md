@@ -26,10 +26,10 @@ Each model is deployed as an independent **Modal app**, forming a modular pipeli
 
 | Model | Description | Link |
 |--------|--------------|------|
-| **[Docling (Granite)](./Deployments/docling)** | Document-level parser using Granite Docling for semantic structure and entity extraction. | https://generated_app_name.modal.run/v1/convert/file|
-| **[DoTS.OCR](./Deployments/dots.ocr)** | Vision-Language OCR model for text extraction and layout-aware recognition. | https://-dots-ocr-vllm-official-app-parse-docu-74eee6.modal.run/ |
-| **[OLMOCR](./Deployments/olmOCR)** | OCR and text parsing model conversion of PDFs and other documents into plain text. |https://modal.app.modal.run/upload|
-| **[Qwen](./Deployments/qwen)** | Multimodal model for reasoning, summarization, and QA over document content. | https://your-app-name--vlmmmodel-extract-document-structure.modal.run"|
+| **[Docling (Granite)](./Deployments/docling)** | Document-level parser using Granite Docling for semantic structure and entity extraction. |https://github.com/docling-project/docling-serve|
+| **[DoTS.OCR](./Deployments/dots.ocr)** | Vision-Language OCR model for text extraction and layout-aware recognition. |https://github.com/rednote-hilab/dots.ocr|
+| **[OLMOCR](./Deployments/olmOCR)** | OCR and text parsing model conversion of PDFs and other documents into plain text. |https://github.com/allenai/olmocr|
+| **[Qwen](./Deployments/qwen)** | Multimodal model for reasoning, summarization, and QA over document content. |https://huggingface.co/Qwen/Qwen2-7B|
 
 ---
 
