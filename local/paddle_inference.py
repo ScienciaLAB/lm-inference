@@ -108,7 +108,7 @@ def main():
         start_time = time.time()
         output = model.predict(
             image_paths,
-            batch_size=args.num_workers,
+            batch_size=os.cpu_count(),
             layout_nms=True
         )
         end_time = time.time()
