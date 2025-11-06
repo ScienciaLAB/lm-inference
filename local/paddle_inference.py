@@ -58,7 +58,6 @@ def main():
     parser.add_argument('--output', '-o', required=True, help='Output directory for processed images and results')
     parser.add_argument('--dpi', type=int, default=150, help='DPI for PDF to image conversion (default: 150)')
     parser.add_argument('--num-workers', type=int, default=1, help='Number of worker processes for parallel processing (default: 1)')
-    parser.add_argument('--headers', action='store_true', help='Extract top 5% and bottom 5% of each page as separate images')
 
     args = parser.parse_args()
 
@@ -72,9 +71,8 @@ def main():
         sys.exit(1)
 
     # Validate num_workers
-    if args.num_workers < 1:
-        print("Error: num-workers must be at least 1")
-        sys.exit(1)
+    num_workers = os.cpu_count() if args.num_workers < 1 else args.num_workers
+    print(f"Number of workers: {num_workers}")
 
     # Create output directory if it doesn't exist
     output_dir = Path(args.output)
@@ -84,8 +82,7 @@ def main():
     print(f"Output directory: {output_dir}")
     print(f"DPI: {args.dpi}")
     print(f"Number of workers: {args.num_workers}")
-    if args.headers:
-        print("Headers mode enabled: extracting top and bottom 5% of each page")
+
 
     print("Loading model...")
     model_start_time = time.time()
