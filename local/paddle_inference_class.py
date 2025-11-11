@@ -1,0 +1,479 @@
+import json
+import os
+import tempfile
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+class DocumentProcessor:
+    def __init__(self, model_name: str = "PP-DocLayout-S", dpi: int = 70, temp_dir: str = None):
+        self.model_name = model_name
+        self.dpi = dpi
+        self.model: Optional[LayoutDetection] = None
+        self.cleanup_after_processing = True
+
+        # Create temporary directory
+        if temp_dir is None:
+            self.temp_dir = Path(tempfile.mkdtemp(prefix="paddle_inference_"))
+        else:
+            self.temp_dir = Path(temp_dir)
+            self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"Using temporary directory: {self.temp_dir}")
+
+    def __del__(self):
+        """Cleanup temporary directory when object is destroyed"""
+        try:
+            import shutil
+            if hasattr(self, 'temp_dir') and self.temp_dir.exists():
+                shutil.rmtree(self.temp_dir)
+                print(f"Cleaned up temporary directory: {self.temp_dir}")
+        except:
+            pass
+
+    def _ensure_directories(self, pdf_path: str, output_dir: Path) -> Path:
+        doc_name = Path(pdf_path).stem
+        doc_output_dir = output_dir / doc_name
+        doc_output_dir.mkdir(parents=True, exist_ok=True)
+        return doc_output_dir
+
+    def _load_model(self) -> None:
+        if self.model is None:
+            from paddleocr import LayoutDetection
+
+            print("Loading model...")
+            start_time = time.time()
+            self.model = LayoutDetection(model_name=self.model_name)
+            load_time = time.time() - start_time
+            print(f"Model loaded in {load_time:.2f} seconds")
+
+    def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
+        from pdf2image import convert_from_path
+
+        print(f"Converting PDF to images: {pdf_path}")
+        images = convert_from_path(pdf_path, dpi=self.dpi, thread_count=os.cpu_count())
+        image_paths = []
+
+        for i, image in enumerate(images, 1):
+            image_path = output_dir / f"page_{i:04d}.jpg"
+            image.save(image_path, 'JPEG')
+            image_paths.append(image_path)
+
+        print(f"Converted {len(images)} pages to images")
+        return image_paths
+
+    def process(self, pdf_path: str, output_dir: Path) -> List[Dict]:
+        self._load_model()
+
+        image_paths = self.pdf_to_images(pdf_path, output_dir)
+        image_path_strings = [str(path) for path in image_paths]
+
+        start_time = time.time()
+        output = self.model.predict(
+            image_path_strings,
+            batch_size=os.cpu_count(),
+            layout_nms=True
+        )
+        inference_time = time.time() - start_time
+        print(f"Process completed in {inference_time:.2f} seconds")
+
+        # Save results
+        for i, res in enumerate(output):
+            res.page_index = i + 1
+            base_name = f"res_{i}"
+
+            res.save_to_img(save_path=str(output_dir / f"{base_name}.jpg"))
+            res.save_to_json(save_path=str(output_dir / f"{base_name}.json"))
+
+        return output
+
+    def cleanup_temp_files(self, doc_output_dir: Path) -> None:
+        if self.cleanup_after_processing:
+            # Keep final results, remove intermediate files if needed
+            pass  # For now, keep all generated files
+
+    def process_grobid_output(self, output_dir: Path) -> None:
+        print(f"Processing GROBID analysis on: {output_dir}")
+
+        json_files = list(output_dir.glob('res_*.json'))
+        if not json_files:
+            print("No JSON files found for GROBID processing")
+            return
+
+        all_filtered_results = []
+
+        for json_file in sorted(json_files):
+            filtered_result = self.filter_layout_elements(str(json_file))
+            all_filtered_results.append(filtered_result)
+
+        # Create aggregated output
+        self.aggregate_filtered_elements(output_dir, all_filtered_results)
+
+    def filter_layout_elements(self, json_file_path: str) -> Dict[str, List[Dict]]:
+        try:
+            with open(json_file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            filtered_elements = {'tables': [], 'figures': [], 'equations': []}
+
+            for box in data.get('boxes', []):
+                label = box.get('label', '').lower()
+                if 'table' in label:
+                    filtered_elements['tables'].append(box)
+                elif any(x in label for x in ['figure', 'image', 'chart']):
+                    filtered_elements['figures'].append(box)
+                elif any(x in label for x in ['equation', 'formula']):
+                    filtered_elements['equations'].append(box)
+
+            return filtered_elements
+
+        except:
+            return {'tables': [], 'figures': [], 'equations': []}
+
+    def aggregate_filtered_elements(self, output_dir: Path, all_results: List[Dict]) -> None:
+        aggregated_data = {
+            'metadata': {
+                'total_pages': len(all_results),
+                'processed_files': []
+            },
+            'tables': [],
+            'figures': [],
+            'equations': [],
+            'summary': {
+                'total_tables': 0,
+                'total_figures': 0,
+                'total_equations': 0
+            }
+        }
+
+        for result in all_results:
+            if result:
+                aggregated_data['tables'].extend(result.get('tables', []))
+                aggregated_data['figures'].extend(result.get('figures', []))
+                aggregated_data['equations'].extend(result.get('equations', []))
+
+        aggregated_data['summary']['total_tables'] = len(aggregated_data['tables'])
+        aggregated_data['summary']['total_figures'] = len(aggregated_data['figures'])
+        aggregated_data['summary']['total_equations'] = len(aggregated_data['equations'])
+
+        aggregated_file = output_dir / 'aggregated_elements.json'
+        with open(aggregated_file, 'w', encoding='utf-8') as f:
+            json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+
+        print(f"Found {aggregated_data['summary']['total_tables']} tables, "
+              f"{aggregated_data['summary']['total_figures']} figures, "
+              f"{aggregated_data['summary']['total_equations']} equations")
+
+    def process_document(self, pdf_path: str, output_dir: str = "output") -> Dict[str, Any]:
+        if not os.path.exists(pdf_path):
+            raise FileNotFoundError(f"Input file '{pdf_path}' does not exist")
+
+        if not pdf_path.lower().endswith('.pdf'):
+            raise ValueError("Input file must be a PDF document")
+
+        print(f"Processing document: {pdf_path}")
+        start_time = time.time()
+
+        output_path = Path(output_dir)
+        doc_output_dir = self._ensure_directories(pdf_path, output_path)
+
+        try:
+            output = self.process(pdf_path, doc_output_dir)
+            self.cleanup_temp_files(doc_output_dir)
+
+            processing_time = time.time() - start_time
+            num_pages = len(output)
+            avg_time_per_page = processing_time / num_pages
+
+            result = {
+                'success': True,
+                'pdf_path': pdf_path,
+                'output_dir': str(doc_output_dir),
+                'num_pages': num_pages,
+                'processing_time': processing_time,
+                'avg_time_per_page': avg_time_per_page,
+                'model_used': self.model_name
+            }
+
+            print(f"Document processed in {processing_time:.2f} seconds "
+                  f"({avg_time_per_page:.2f} sec/page)")
+            return result
+
+        except Exception as e:
+            error_result = {
+                'success': False,
+                'pdf_path': pdf_path,
+                'error': str(e),
+                'processing_time': time.time() - start_time
+            }
+            print(f"Error processing {pdf_path}: {str(e)}")
+            return error_result
+
+
+def process_grobid_output(output_dir: Path) -> None:
+    print(f"Processing GROBID analysis on: {output_dir}")
+
+    json_files = list(output_dir.glob('res_*.json'))
+    if not json_files:
+        print("No JSON files found for GROBID processing")
+        return
+
+    all_filtered_results = []
+
+    for json_file in sorted(json_files):
+        filtered_result = filter_layout_elements(str(json_file))
+        all_filtered_results.append(filtered_result)
+
+    # Create aggregated output
+    aggregate_filtered_elements(output_dir, all_filtered_results)
+
+
+def filter_layout_elements(json_file_path: str) -> Dict[str, List[Dict]]:
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        filtered_elements = {'tables': [], 'figures': [], 'equations': []}
+
+        for box in data.get('boxes', []):
+            label = box.get('label', '').lower()
+            if 'table' in label:
+                filtered_elements['tables'].append(box)
+            elif any(x in label for x in ['figure', 'image', 'chart']):
+                filtered_elements['figures'].append(box)
+            elif any(x in label for x in ['equation', 'formula']):
+                filtered_elements['equations'].append(box)
+
+        return filtered_elements
+
+    except:
+        return {'tables': [], 'figures': [], 'equations': []}
+
+
+def aggregate_filtered_elements(output_dir: Path, all_results: List[Dict]) -> None:
+    aggregated_data = {
+        'metadata': {
+            'total_pages': len(all_results),
+            'processed_files': []
+        },
+        'tables': [],
+        'figures': [],
+        'equations': [],
+        'summary': {
+            'total_tables': 0,
+            'total_figures': 0,
+            'total_equations': 0
+        }
+    }
+
+    for result in all_results:
+        if result:
+            aggregated_data['tables'].extend(result.get('tables', []))
+            aggregated_data['figures'].extend(result.get('figures', []))
+            aggregated_data['equations'].extend(result.get('equations', []))
+
+    aggregated_data['summary']['total_tables'] = len(aggregated_data['tables'])
+    aggregated_data['summary']['total_figures'] = len(aggregated_data['figures'])
+    aggregated_data['summary']['total_equations'] = len(aggregated_data['equations'])
+
+    aggregated_file = output_dir / 'aggregated_elements.json'
+    with open(aggregated_file, 'w', encoding='utf-8') as f:
+        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+
+    print(f"Found {aggregated_data['summary']['total_tables']} tables, "
+          f"{aggregated_data['summary']['total_figures']} figures, "
+          f"{aggregated_data['summary']['total_equations']} equations")
+
+
+def process_display_elements(output_dir: str) -> None:
+    """Process layout results to extract only display elements: tables, figures, and equations"""
+    output_path = Path(output_dir)
+    print(f"Processing display elements in: {output_path}")
+
+    json_files = list(output_path.glob('res_*.json'))
+    if not json_files:
+        print("No JSON files found for display processing")
+        return
+
+    all_filtered_results = []
+
+    for json_file in sorted(json_files):
+        filtered_result = filter_display_elements(str(json_file))
+        all_filtered_results.append(filtered_result)
+
+    # Create aggregated output
+    aggregate_display_elements(output_path, all_filtered_results)
+
+
+def process_paratext_elements(output_dir: str) -> None:
+    """Process layout results to extract only paratext elements: headers and footers"""
+    output_path = Path(output_dir)
+    print(f"Processing paratext elements in: {output_path}")
+
+    json_files = list(output_path.glob('res_*.json'))
+    if not json_files:
+        print("No JSON files found for paratext processing")
+        return
+
+    all_filtered_results = []
+
+    for json_file in sorted(json_files):
+        filtered_result = filter_paratext_elements(str(json_file))
+        all_filtered_results.append(filtered_result)
+
+    # Create aggregated output
+    aggregate_paratext_elements(output_path, all_filtered_results)
+
+
+def filter_display_elements(json_file_path: str) -> Dict[str, List[Dict]]:
+    """Filter JSON results to extract only display elements (tables, figures, equations)"""
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        filtered_elements = {'tables': [], 'figures': [], 'equations': []}
+
+        for box in data.get('boxes', []):
+            label = box.get('label', '').lower()
+            if 'table' in label:
+                filtered_elements['tables'].append(box)
+            elif any(x in label for x in ['figure', 'image', 'chart']):
+                filtered_elements['figures'].append(box)
+            elif any(x in label for x in ['equation', 'formula']):
+                filtered_elements['equations'].append(box)
+
+        return filtered_elements
+
+    except:
+        return {'tables': [], 'figures': [], 'equations': []}
+
+
+def filter_paratext_elements(json_file_path: str) -> Dict[str, List[Dict]]:
+    """Filter JSON results to extract only paratext elements (headers, footers)"""
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        filtered_elements = {'headers': [], 'footers': []}
+
+        for box in data.get('boxes', []):
+            label = box.get('label', '').lower()
+            if any(x in label for x in ['header', 'heading', 'title']):
+                filtered_elements['headers'].append(box)
+            elif any(x in label for x in ['footer', 'footnote']):
+                filtered_elements['footers'].append(box)
+
+        return filtered_elements
+
+    except:
+        return {'headers': [], 'footers': []}
+
+
+def aggregate_display_elements(output_dir: Path, all_results: List[Dict]) -> None:
+    """Aggregate display elements and save to JSON file"""
+    aggregated_data = {
+        'metadata': {
+            'total_pages': len(all_results),
+            'processed_files': [],
+            'filter_type': 'display'
+        },
+        'tables': [],
+        'figures': [],
+        'equations': [],
+        'summary': {
+            'total_tables': 0,
+            'total_figures': 0,
+            'total_equations': 0
+        }
+    }
+
+    for result in all_results:
+        if result:
+            aggregated_data['tables'].extend(result.get('tables', []))
+            aggregated_data['figures'].extend(result.get('figures', []))
+            aggregated_data['equations'].extend(result.get('equations', []))
+
+    aggregated_data['summary']['total_tables'] = len(aggregated_data['tables'])
+    aggregated_data['summary']['total_figures'] = len(aggregated_data['figures'])
+    aggregated_data['summary']['total_equations'] = len(aggregated_data['equations'])
+
+    aggregated_file = output_dir / 'aggregated_display_elements.json'
+    with open(aggregated_file, 'w', encoding='utf-8') as f:
+        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+
+    print(f"Found {aggregated_data['summary']['total_tables']} tables, "
+          f"{aggregated_data['summary']['total_figures']} figures, "
+          f"{aggregated_data['summary']['total_equations']} equations")
+    print(f"Display results saved to: {aggregated_file}")
+
+
+def aggregate_paratext_elements(output_dir: Path, all_results: List[Dict]) -> None:
+    """Aggregate paratext elements and save to JSON file"""
+    aggregated_data = {
+        'metadata': {
+            'total_pages': len(all_results),
+            'processed_files': [],
+            'filter_type': 'paratext'
+        },
+        'headers': [],
+        'footers': [],
+        'summary': {
+            'total_headers': 0,
+            'total_footers': 0
+        }
+    }
+
+    for result in all_results:
+        if result:
+            aggregated_data['headers'].extend(result.get('headers', []))
+            aggregated_data['footers'].extend(result.get('footers', []))
+
+    aggregated_data['summary']['total_headers'] = len(aggregated_data['headers'])
+    aggregated_data['summary']['total_footers'] = len(aggregated_data['footers'])
+
+    aggregated_file = output_dir / 'aggregated_paratext_elements.json'
+    with open(aggregated_file, 'w', encoding='utf-8') as f:
+        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+
+    print(f"Found {aggregated_data['summary']['total_headers']} headers, "
+          f"{aggregated_data['summary']['total_footers']} footers")
+    print(f"Paratext results saved to: {aggregated_file}")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Process PDF documents with PaddleOCR layout detection')
+    parser.add_argument('input', help='Input PDF document path')
+    parser.add_argument('--output', '-o', default='output', help='Output directory for processed images and results')
+    parser.add_argument('--model-name',
+                        choices=['PP-DocLayout-L', 'PP-DocLayout-M', 'PP-DocLayout-S', 'PP-DocLayoutV2',
+                                 'PP-DocBlockLayout'],
+                        default='PP-DocLayout-S', help='Model name for layout detection (default: PP-DocLayout-S)')
+    parser.add_argument('--dpi', type=int, default=70, help='DPI for PDF to image conversion (default: 70)')
+    parser.add_argument('--temp-dir', help='Temporary directory for processing (default: auto-generated)')
+    parser.add_argument('--only',
+                        choices=["display", "paratext"],
+                        help='Parse JSON output to extract only "display" elements: '
+                             'tables, figures, and equations, "paratext": sugar coat such '
+                             'headers and footers, and create aggregated results')
+
+    args = parser.parse_args()
+
+    processor = DocumentProcessor(
+        model_name=args.model_name,
+        dpi=args.dpi,
+        temp_dir=args.temp_dir
+    )
+
+    result = processor.process_document(args.input, args.output)
+
+    # Apply filtering if requested
+    if args.only:
+        if args.only == "display":
+            process_display_elements(result['output_dir'])
+        elif args.only == "paratext":
+            process_paratext_elements(result['output_dir'])
+
+    print("Processing result:", result)
