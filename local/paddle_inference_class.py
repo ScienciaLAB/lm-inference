@@ -219,44 +219,32 @@ def aggregate_filtered_elements(output_dir: Path, all_results: List[Dict]) -> No
           f"{aggregated_data['summary']['total_equations']} equations")
 
 
-def process_display_elements(output_dir: str) -> None:
-    """Process layout results to extract only display elements: tables, figures, and equations"""
+def process_elements(output_dir: str, element_types: List[str], filter_func, filter_type: str = "custom") -> None:
+    """
+    Unified method to process layout results and extract specified element types
+
+    Args:
+        output_dir: Directory containing the JSON files to process
+        element_types: List of element types to extract (e.g., ['tables', 'figures', 'equations'])
+        filter_func: Function to filter elements from JSON files
+        filter_type: Type of processing ('display', 'paratext', or 'custom') for logging/filename
+    """
     output_path = Path(output_dir)
-    print(f"Processing display elements in: {output_path}")
+    print(f"Processing {filter_type} elements in: {output_path}")
 
     json_files = list(output_path.glob('res_*.json'))
     if not json_files:
-        print("No JSON files found for display processing")
+        print(f"No JSON files found for {filter_type} processing")
         return
 
     all_filtered_results = []
 
     for json_file in sorted(json_files):
-        filtered_result = filter_display_elements(str(json_file))
+        filtered_result = filter_func(str(json_file))
         all_filtered_results.append(filtered_result)
 
     # Create aggregated output
-    aggregate_display_elements(output_path, all_filtered_results)
-
-
-def process_paratext_elements(output_dir: str) -> None:
-    """Process layout results to extract only paratext elements: headers and footers"""
-    output_path = Path(output_dir)
-    print(f"Processing paratext elements in: {output_path}")
-
-    json_files = list(output_path.glob('res_*.json'))
-    if not json_files:
-        print("No JSON files found for paratext processing")
-        return
-
-    all_filtered_results = []
-
-    for json_file in sorted(json_files):
-        filtered_result = filter_paratext_elements(str(json_file))
-        all_filtered_results.append(filtered_result)
-
-    # Create aggregated output
-    aggregate_paratext_elements(output_path, all_filtered_results)
+    aggregate_elements(output_path, all_filtered_results, element_types, filter_type)
 
 
 def filter_display_elements(json_file_path: str) -> Dict[str, List[Dict]]:
@@ -303,75 +291,63 @@ def filter_paratext_elements(json_file_path: str) -> Dict[str, List[Dict]]:
         return {'headers': [], 'footers': []}
 
 
-def aggregate_display_elements(output_dir: Path, all_results: List[Dict]) -> None:
-    """Aggregate display elements and save to JSON file"""
+def aggregate_elements(output_dir: Path, all_results: List[Dict], element_types: List[str] = None, filter_type: str = "custom") -> None:
+    """
+    Unified method to aggregate elements and save to JSON file
+
+    Args:
+        output_dir: Directory to save the aggregated results
+        all_results: List of filtered results from all pages
+        element_types: List of element types to include (e.g., ['tables', 'figures', 'equations'])
+        filter_type: Type of filtering applied ('display', 'paratext', or 'custom')
+    """
+    if element_types is None:
+        element_types = []
+
+    # Initialize aggregated data structure
     aggregated_data = {
         'metadata': {
             'total_pages': len(all_results),
             'processed_files': [],
-            'filter_type': 'display'
+            'filter_type': filter_type
         },
-        'tables': [],
-        'figures': [],
-        'equations': [],
-        'summary': {
-            'total_tables': 0,
-            'total_figures': 0,
-            'total_equations': 0
-        }
+        'elements': {element_type: [] for element_type in element_types},
+        'summary': {f'total_{element_type}': 0 for element_type in element_types}
     }
 
+    # Aggregate elements from all results
     for result in all_results:
         if result:
-            aggregated_data['tables'].extend(result.get('tables', []))
-            aggregated_data['figures'].extend(result.get('figures', []))
-            aggregated_data['equations'].extend(result.get('equations', []))
+            for element_type in element_types:
+                aggregated_data['elements'][element_type].extend(result.get(element_type, []))
 
-    aggregated_data['summary']['total_tables'] = len(aggregated_data['tables'])
-    aggregated_data['summary']['total_figures'] = len(aggregated_data['figures'])
-    aggregated_data['summary']['total_equations'] = len(aggregated_data['equations'])
+    # Calculate summaries
+    for element_type in element_types:
+        aggregated_data['summary'][f'total_{element_type}'] = len(aggregated_data['elements'][element_type])
 
-    aggregated_file = output_dir / 'aggregated_display_elements.json'
+    # Generate filename
+    if filter_type in ['display', 'paratext']:
+        filename = f'aggregated_{filter_type}_elements.json'
+    else:
+        element_str = '_'.join(element_types)
+        filename = f'aggregated_{element_str}_elements.json'
+
+    aggregated_file = output_dir / filename
+
+    # Save to file
     with open(aggregated_file, 'w', encoding='utf-8') as f:
         json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
 
-    print(f"Found {aggregated_data['summary']['total_tables']} tables, "
-          f"{aggregated_data['summary']['total_figures']} figures, "
-          f"{aggregated_data['summary']['total_equations']} equations")
-    print(f"Display results saved to: {aggregated_file}")
+    # Print summary
+    summary_parts = []
+    for element_type in element_types:
+        count = aggregated_data['summary'][f'total_{element_type}']
+        summary_parts.append(f"{count} {element_type}")
+
+    print(f"Found {', '.join(summary_parts)}")
+    print(f"Results saved to: {aggregated_file}")
 
 
-def aggregate_paratext_elements(output_dir: Path, all_results: List[Dict]) -> None:
-    """Aggregate paratext elements and save to JSON file"""
-    aggregated_data = {
-        'metadata': {
-            'total_pages': len(all_results),
-            'processed_files': [],
-            'filter_type': 'paratext'
-        },
-        'headers': [],
-        'footers': [],
-        'summary': {
-            'total_headers': 0,
-            'total_footers': 0
-        }
-    }
-
-    for result in all_results:
-        if result:
-            aggregated_data['headers'].extend(result.get('headers', []))
-            aggregated_data['footers'].extend(result.get('footers', []))
-
-    aggregated_data['summary']['total_headers'] = len(aggregated_data['headers'])
-    aggregated_data['summary']['total_footers'] = len(aggregated_data['footers'])
-
-    aggregated_file = output_dir / 'aggregated_paratext_elements.json'
-    with open(aggregated_file, 'w', encoding='utf-8') as f:
-        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
-
-    print(f"Found {aggregated_data['summary']['total_headers']} headers, "
-          f"{aggregated_data['summary']['total_footers']} footers")
-    print(f"Paratext results saved to: {aggregated_file}")
 
 
 if __name__ == "__main__":
@@ -406,8 +382,18 @@ if __name__ == "__main__":
     # Apply filtering if requested
     if args.only:
         if args.only == "display":
-            process_display_elements(result['output_dir'])
+            process_elements(
+                result['output_dir'],
+                ['tables', 'figures', 'equations'],
+                filter_display_elements,
+                'display'
+            )
         elif args.only == "paratext":
-            process_paratext_elements(result['output_dir'])
+            process_elements(
+                result['output_dir'],
+                ['headers', 'footers'],
+                filter_paratext_elements,
+                'paratext'
+            )
 
     print("Processing result:", result)
