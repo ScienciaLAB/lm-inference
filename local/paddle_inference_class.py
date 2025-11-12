@@ -5,9 +5,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from paddleocr import LayoutDetection
+
 
 class DocumentProcessor:
-    def __init__(self, model_name: str = "PP-DocLayout-S", dpi: int = 70, temp_dir: str = None):
+    def __init__(self, model_name: str = "PP-DocLayout-S", dpi: int = 70, temp_dir: str = None, preload_model:bool = False):
         self.model_name = model_name
         self.dpi = dpi
         self.model: Optional[LayoutDetection] = None
@@ -19,6 +21,9 @@ class DocumentProcessor:
         else:
             self.temp_dir = Path(temp_dir)
             self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        if preload_model:
+            self._load_model()
 
         print(f"Using temporary directory: {self.temp_dir}")
 
@@ -92,78 +97,6 @@ class DocumentProcessor:
         if self.cleanup_after_processing:
             # Keep final results, remove intermediate files if needed
             pass  # For now, keep all generated files
-
-    def process_grobid_output(self, output_dir: Path) -> None:
-        print(f"Processing GROBID analysis on: {output_dir}")
-
-        json_files = list(output_dir.glob('res_*.json'))
-        if not json_files:
-            print("No JSON files found for GROBID processing")
-            return
-
-        all_filtered_results = []
-
-        for json_file in sorted(json_files):
-            filtered_result = self.filter_layout_elements(str(json_file))
-            all_filtered_results.append(filtered_result)
-
-        # Create aggregated output
-        self.aggregate_filtered_elements(output_dir, all_filtered_results)
-
-    def filter_layout_elements(self, json_file_path: str) -> Dict[str, List[Dict]]:
-        try:
-            with open(json_file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            filtered_elements = {'tables': [], 'figures': [], 'equations': []}
-
-            for box in data.get('boxes', []):
-                label = box.get('label', '').lower()
-                if 'table' in label:
-                    filtered_elements['tables'].append(box)
-                elif any(x in label for x in ['figure', 'image', 'chart']):
-                    filtered_elements['figures'].append(box)
-                elif any(x in label for x in ['equation', 'formula']):
-                    filtered_elements['equations'].append(box)
-
-            return filtered_elements
-
-        except:
-            return {'tables': [], 'figures': [], 'equations': []}
-
-    def aggregate_filtered_elements(self, output_dir: Path, all_results: List[Dict]) -> None:
-        aggregated_data = {
-            'metadata': {
-                'total_pages': len(all_results),
-                'processed_files': []
-            },
-            'tables': [],
-            'figures': [],
-            'equations': [],
-            'summary': {
-                'total_tables': 0,
-                'total_figures': 0,
-                'total_equations': 0
-            }
-        }
-
-        for result in all_results:
-            if result:
-                aggregated_data['tables'].extend(result.get('tables', []))
-                aggregated_data['figures'].extend(result.get('figures', []))
-                aggregated_data['equations'].extend(result.get('equations', []))
-
-        aggregated_data['summary']['total_tables'] = len(aggregated_data['tables'])
-        aggregated_data['summary']['total_figures'] = len(aggregated_data['figures'])
-        aggregated_data['summary']['total_equations'] = len(aggregated_data['equations'])
-
-        aggregated_file = output_dir / 'aggregated_elements.json'
-        with open(aggregated_file, 'w', encoding='utf-8') as f:
-            json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
-
-        print(f"Found {aggregated_data['summary']['total_tables']} tables, "
-              f"{aggregated_data['summary']['total_figures']} figures, "
-              f"{aggregated_data['summary']['total_equations']} equations")
 
     def process_document(self, pdf_path: str, output_dir: str = "output") -> Dict[str, Any]:
         if not os.path.exists(pdf_path):
@@ -464,7 +397,8 @@ if __name__ == "__main__":
     processor = DocumentProcessor(
         model_name=args.model_name,
         dpi=args.dpi,
-        temp_dir=args.temp_dir
+        temp_dir=args.temp_dir,
+        preload_model=True
     )
 
     result = processor.process_document(args.input, args.output)
