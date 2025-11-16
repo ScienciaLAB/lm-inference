@@ -257,24 +257,25 @@ def aggregate_filtered_elements(output_dir: Path, all_results: List[Dict]) -> No
 
 
 def process_elements(
-        output_dir: str,
-        main_output_dir: str, filter_func,
+        document_output_dir: str,
+        main_output_dir: str,
+        filter_func,
         filter_type: str = "custom"
 ) -> None:
     """
     Unified method to process layout results and extract specified element types
 
     Args:
-        output_dir: Directory containing the JSON files to process (document subdirectory)
+        document_output_dir: Directory containing the JSON files to process (document subdirectory)
         main_output_dir: Main output directory to save aggregated results
         filter_func: Function to filter elements from JSON files
         filter_type: Type of processing ('display', 'paratext', or 'custom') for logging/filename
     """
-    output_path = Path(output_dir)
+    document_output_path = Path(document_output_dir)
     main_output_path = Path(main_output_dir)
-    print(f"Processing {filter_type} elements in: {output_path}")
+    print(f"Processing {filter_type} elements in: {document_output_path}")
 
-    json_files = list(output_path.glob('res_*.json'))
+    json_files = list(document_output_path.glob('res_*.json'))
     if not json_files:
         print(f"No JSON files found for {filter_type} processing")
         return
@@ -283,12 +284,40 @@ def process_elements(
 
     for json_file in sorted(json_files):
         filtered_result = filter_func(str(json_file))
+        page_number = int(json_file.stem.split('_')[1])
+
         all_filtered_results.append(filtered_result)
 
-    elements = list(set([key for result in all_filtered_results for key in result.keys()]))
+    element_types = list(set([key for result in all_filtered_results for key in result.keys()]))
 
     # Create aggregated output in main directory
-    aggregate_elements(main_output_path, all_filtered_results, elements, filter_type)
+    aggregated_data = aggregate_elements(all_filtered_results, element_types, filter_type)
+
+    # Calculate summaries
+    for element_type in element_types:
+        aggregated_data['summary'][f'total_{element_type}'] = len(aggregated_data['elements'][element_type])
+
+    # Generate filename
+    if filter_type in ['display', 'paratext']:
+        filename = f'aggregated_{filter_type}_elements.json'
+    else:
+        element_str = '_'.join(element_types)
+        filename = f'aggregated_{element_str}_elements.json'
+
+    aggregated_file = main_output_path / filename
+
+    # Save to file
+    with open(aggregated_file, 'w', encoding='utf-8') as f:
+        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
+
+    # Print summary
+    summary_parts = []
+    for element_type in element_types:
+        count = aggregated_data['summary'][f'total_{element_type}']
+        summary_parts.append(f"{count} {element_type}")
+
+    print(f"Found {', '.join(summary_parts)}")
+    print(f"Results saved to: {aggregated_file}")
 
 
 def filter_display_elements(json_file_path: str) -> Dict[str, List[Dict]]:
@@ -362,8 +391,11 @@ def filter_grobid_elements(json_file_path: str) -> Dict[str, List[Dict]]:
         return {'headers': [], 'footers': [], 'tables': [], 'figures': [], 'equations': []}
 
 
-def aggregate_elements(output_dir: Path, all_results: List[Dict], element_types: List[str] = None,
-                       filter_type: str = "custom") -> None:
+def aggregate_elements(
+        all_results: List[Dict],
+        element_types: List[str] = None,
+        filter_type: str = "custom"
+) -> Dict[str, Any]:
     """
     Unified method to aggregate elements and save to JSON file
 
@@ -393,31 +425,7 @@ def aggregate_elements(output_dir: Path, all_results: List[Dict], element_types:
             for element_type in element_types:
                 aggregated_data['elements'][element_type].extend(result.get(element_type, []))
 
-    # Calculate summaries
-    for element_type in element_types:
-        aggregated_data['summary'][f'total_{element_type}'] = len(aggregated_data['elements'][element_type])
-
-    # Generate filename
-    if filter_type in ['display', 'paratext']:
-        filename = f'aggregated_{filter_type}_elements.json'
-    else:
-        element_str = '_'.join(element_types)
-        filename = f'aggregated_{element_str}_elements.json'
-
-    aggregated_file = output_dir / filename
-
-    # Save to file
-    with open(aggregated_file, 'w', encoding='utf-8') as f:
-        json.dump(aggregated_data, f, indent=2, ensure_ascii=False)
-
-    # Print summary
-    summary_parts = []
-    for element_type in element_types:
-        count = aggregated_data['summary'][f'total_{element_type}']
-        summary_parts.append(f"{count} {element_type}")
-
-    print(f"Found {', '.join(summary_parts)}")
-    print(f"Results saved to: {aggregated_file}")
+    return aggregated_data
 
 
 if __name__ == "__main__":
