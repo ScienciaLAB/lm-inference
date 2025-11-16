@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -34,7 +35,7 @@ class DocumentProcessor:
             if hasattr(self, 'temp_dir') and self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
                 print(f"Cleaned up temporary directory: {self.temp_dir}")
-        except:
+        except OSError:
             pass
 
     def _ensure_directories(self, pdf_path: str, output_dir: Path) -> Path:
@@ -93,10 +94,44 @@ class DocumentProcessor:
 
         return output
 
-    def cleanup_temp_files(self, doc_output_dir: Path) -> None:
-        if self.cleanup_after_processing:
-            # Keep final results, remove intermediate files if needed
-            pass  # For now, keep all generated files
+    def cleanup_temp_files(self, doc_output_dir: Path, main_output_dir: Path = None, cleanup_images: bool = False,
+                          cleanup_rename: bool = False, pdf_name: str = None) -> None:
+        """
+        Clean up temporary files generated during processing
+
+        Args:
+            doc_output_dir: Directory containing processed files (document subdirectory)
+            main_output_dir: Main output directory where aggregated files are saved
+            cleanup_images: Whether to remove intermediate image files and entire directory
+            cleanup_rename: Whether to rename aggregated JSON to PDF name
+            pdf_name: Name of the input PDF file (without extension) for renaming
+        """
+        if not self.cleanup_after_processing and not cleanup_images:
+            return
+
+        try:
+            # Rename aggregated JSON to PDF name if requested (before cleanup)
+            if cleanup_rename and pdf_name and main_output_dir:
+                # Find the aggregated JSON file in main output directory
+                aggregated_files = list(main_output_dir.glob('aggregated_*_elements.json'))
+                if aggregated_files:
+                    # Take the first aggregated file found
+                    source_file = aggregated_files[0]
+                    target_file = main_output_dir / f"{pdf_name}.json"
+
+                    # Rename/move the file
+                    source_file.rename(target_file)
+                    print(f"Renamed aggregated output to: {target_file}")
+                else:
+                    print("No aggregated JSON file found to rename")
+
+            # Remove entire document subdirectory if cleanup_images is True
+            if cleanup_images and doc_output_dir.exists():
+                shutil.rmtree(doc_output_dir)
+                print(f"Removed temporary directory: {doc_output_dir}")
+
+        except OSError as e:
+            print(f"Error during cleanup: {str(e)}")
 
     def process_document(self, pdf_path: str, output_dir: str = "output") -> Dict[str, Any]:
         if not os.path.exists(pdf_path):
@@ -123,6 +158,7 @@ class DocumentProcessor:
                 'success': True,
                 'pdf_path': pdf_path,
                 'output_dir': str(doc_output_dir),
+                'main_output_dir': str(output_path),
                 'num_pages': num_pages,
                 'processing_time': processing_time,
                 'avg_time_per_page': avg_time_per_page,
@@ -144,7 +180,7 @@ class DocumentProcessor:
             return error_result
 
 
-def process_grobid_output(output_dir: Path) -> None:
+def process_grobid_output(output_dir: Path, main_output_dir: Path) -> None:
     print(f"Processing GROBID analysis on: {output_dir}")
 
     json_files = list(output_dir.glob('res_*.json'))
@@ -158,8 +194,8 @@ def process_grobid_output(output_dir: Path) -> None:
         filtered_result = filter_layout_elements(str(json_file))
         all_filtered_results.append(filtered_result)
 
-    # Create aggregated output
-    aggregate_filtered_elements(output_dir, all_filtered_results)
+    # Create aggregated output in main directory
+    aggregate_filtered_elements(main_output_dir, all_filtered_results)
 
 
 def filter_layout_elements(json_file_path: str) -> Dict[str, List[Dict]]:
@@ -219,17 +255,19 @@ def aggregate_filtered_elements(output_dir: Path, all_results: List[Dict]) -> No
           f"{aggregated_data['summary']['total_equations']} equations")
 
 
-def process_elements(output_dir: str, element_types: List[str], filter_func, filter_type: str = "custom") -> None:
+def process_elements(output_dir: str, main_output_dir: str, element_types: List[str], filter_func, filter_type: str = "custom") -> None:
     """
     Unified method to process layout results and extract specified element types
 
     Args:
-        output_dir: Directory containing the JSON files to process
+        output_dir: Directory containing the JSON files to process (document subdirectory)
+        main_output_dir: Main output directory to save aggregated results
         element_types: List of element types to extract (e.g., ['tables', 'figures', 'equations'])
         filter_func: Function to filter elements from JSON files
         filter_type: Type of processing ('display', 'paratext', or 'custom') for logging/filename
     """
     output_path = Path(output_dir)
+    main_output_path = Path(main_output_dir)
     print(f"Processing {filter_type} elements in: {output_path}")
 
     json_files = list(output_path.glob('res_*.json'))
@@ -243,8 +281,8 @@ def process_elements(output_dir: str, element_types: List[str], filter_func, fil
         filtered_result = filter_func(str(json_file))
         all_filtered_results.append(filtered_result)
 
-    # Create aggregated output
-    aggregate_elements(output_path, all_filtered_results, element_types, filter_type)
+    # Create aggregated output in main directory
+    aggregate_elements(main_output_path, all_filtered_results, element_types, filter_type)
 
 
 def filter_display_elements(json_file_path: str) -> Dict[str, List[Dict]]:
@@ -289,6 +327,49 @@ def filter_paratext_elements(json_file_path: str) -> Dict[str, List[Dict]]:
 
     except:
         return {'headers': [], 'footers': []}
+
+
+def filter_grobid_elements(json_file_path: str) -> Dict[str, List[Dict]]:
+    """Filter JSON results to extract both display and paratext elements (grobid-style)"""
+    try:
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        filtered_elements = {
+            'tables': [],
+            'figures': [],
+            'equations': [],
+            'headers': [],
+            'footers': []
+        }
+
+        for box in data.get('boxes', []):
+            label = box.get('label', '').lower()
+
+            # Display elements
+            if 'table' in label:
+                filtered_elements['tables'].append(box)
+            elif any(x in label for x in ['figure', 'image', 'chart']):
+                filtered_elements['figures'].append(box)
+            elif any(x in label for x in ['equation', 'formula']):
+                filtered_elements['equations'].append(box)
+
+            # Paratext elements
+            elif any(x in label for x in ['header', 'heading', 'title']):
+                filtered_elements['headers'].append(box)
+            elif any(x in label for x in ['footer', 'footnote']):
+                filtered_elements['footers'].append(box)
+
+        return filtered_elements
+
+    except:
+        return {
+            'tables': [],
+            'figures': [],
+            'equations': [],
+            'headers': [],
+            'footers': []
+        }
 
 
 def aggregate_elements(output_dir: Path, all_results: List[Dict], element_types: List[str] = None, filter_type: str = "custom") -> None:
@@ -363,10 +444,15 @@ if __name__ == "__main__":
     parser.add_argument('--dpi', type=int, default=70, help='DPI for PDF to image conversion (default: 70)')
     parser.add_argument('--temp-dir', help='Temporary directory for processing (default: auto-generated)')
     parser.add_argument('--only',
-                        choices=["display", "paratext"],
+                        choices=["display", "paratext", "grobid"],
                         help='Parse JSON output to extract only "display" elements: '
                              'tables, figures, and equations, "paratext": sugar coat such '
-                             'headers and footers, and create aggregated results')
+                             'headers and footers, "grobid": both display and paratext, '
+                             'and create aggregated results')
+    parser.add_argument('--cleanup-images',
+                        action='store_true',
+                        help='Clean up intermediate image files and keep only the aggregated JSON file '
+                             'named after the input PDF (e.g., document.pdf → document.json)')
 
     args = parser.parse_args()
 
@@ -384,6 +470,7 @@ if __name__ == "__main__":
         if args.only == "display":
             process_elements(
                 result['output_dir'],
+                result['main_output_dir'],
                 ['tables', 'figures', 'equations'],
                 filter_display_elements,
                 'display'
@@ -391,9 +478,31 @@ if __name__ == "__main__":
         elif args.only == "paratext":
             process_elements(
                 result['output_dir'],
+                result['main_output_dir'],
                 ['headers', 'footers'],
                 filter_paratext_elements,
                 'paratext'
             )
+        elif args.only == "grobid":
+            process_elements(
+                result['output_dir'],
+                result['main_output_dir'],
+                ['tables', 'figures', 'equations', 'headers', 'footers'],
+                filter_grobid_elements,
+                'grobid'
+            )
+
+    # Apply cleanup if requested
+    if hasattr(args, 'cleanup_images') and args.cleanup_images:
+        doc_output_dir = Path(result['output_dir'])
+        main_output_dir = Path(result['main_output_dir'])
+        pdf_name = Path(args.input).stem
+        processor.cleanup_temp_files(
+            doc_output_dir,
+            main_output_dir,
+            cleanup_images=True,
+            cleanup_rename=True,
+            pdf_name=pdf_name
+        )
 
     print("Processing result:", result)
