@@ -16,10 +16,8 @@ import threading
 # Import the DocumentProcessor class and filtering functions from the existing module
 from paddle_inference import (
     DocumentProcessor,
-    process_elements,
-    filter_display_elements,
-    filter_paratext_elements,
-    filter_grobid_elements
+    filter_and_aggregate,
+    load_transform_elements
 )
 
 
@@ -96,30 +94,36 @@ class BatchProcessor:
             # Process the document
             result = processor.process_document(pdf_path, output_dir)
 
+            bounding_boxes = load_transform_elements(
+                result['output_dir']
+            )
+
             # Apply filtering if requested
-            if result.get('success', False) and self.only:
-                if self.only == "display":
-                    process_elements(
-                        result['output_dir'],
-                        result['main_output_dir'],
-                        filter_display_elements,
-                        'display'
-                    )
-                elif self.only == "paratext":
-                    process_elements(
-                        result['output_dir'],
-                        result['main_output_dir'],
-                        filter_paratext_elements,
-                        'paratext'
-                    )
-                elif self.only == "grobid":
-                    # Use the new grobid format processing
-                    process_elements(
-                        result['output_dir'],
-                        result['main_output_dir'],
-                        filter_grobid_elements,
-                        'grobid'
-                    )
+            if result.get('success', False):
+                bounding_boxes = load_transform_elements(
+                    result['output_dir']
+                )
+
+                if self.only:
+                    figure_type_aggregation = {
+                        "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
+                        "table": ["table", "table_text"],
+                        "equation": ["equation", "formula", "equation_text"]
+                    }
+
+                    paratext_type_aggregation = {
+                        "headnote": ["header"],
+                        "footer": ["footer"]
+                    }
+
+                    if self.only == "display":
+                        bounding_boxes = filter_and_aggregate(bounding_boxes, figure_type_aggregation)
+                    elif self.only == "paratext":
+                        bounding_boxes = filter_and_aggregate(bounding_boxes, paratext_type_aggregation)
+                    elif self.only == "grobid":
+                        grobid_type_aggregation = {**figure_type_aggregation, **paratext_type_aggregation}
+                        bounding_boxes = filter_and_aggregate(bounding_boxes, grobid_type_aggregation)
+
 
             # Apply cleanup if requested
             if result.get('success', False) and self.cleanup_images:
