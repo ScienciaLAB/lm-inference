@@ -94,10 +94,6 @@ class BatchProcessor:
             # Process the document
             result = processor.process_document(pdf_path, output_dir)
 
-            bounding_boxes = load_transform_elements(
-                result['output_dir']
-            )
-
             # Apply filtering if requested
             if result.get('success', False):
                 bounding_boxes = load_transform_elements(
@@ -147,8 +143,9 @@ class BatchProcessor:
                 return pdf_path, False, error_msg, processing_time
 
         except Exception as e:
+            import traceback
             processing_time = time.time() - start_time
-            error_msg = f"Exception: {str(e)}"
+            error_msg = f"Exception: {str(e)}\nStacktrace:\n{traceback.format_exc()}"
             return pdf_path, False, error_msg, processing_time
 
     def update_progress(self, success, pdf_path, error_msg=None):
@@ -239,7 +236,10 @@ class BatchProcessor:
             return len(self.failed_files) == 0
 
         except Exception as e:
+            import traceback
             print(f"Batch processing failed: {str(e)}")
+            print("Stacktrace:")
+            print(traceback.format_exc())
             return False
 
     def print_summary(self, total_time):
