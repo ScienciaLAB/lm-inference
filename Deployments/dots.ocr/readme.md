@@ -15,7 +15,7 @@ Output formats are: ['json_content', 'markdown_content', 'markdown_nohf_content'
 **example** 
 
 ```shell
-curl -X POST https://sana-khamassi5678--dots-ocr-vllm-official-app-parse-docu-74eee6.modal.run/ \
+curl -X POST https://sana-khamaassi--dots-ocr-vllm-official-app-parse-documen-4bd76a.modal.run \
   -F 'file=@/Users/mandamac1/Downloads/scie1.pdf' \
   -F 'prompt_mode=prompt_layout_all_en' \
   -F 'num_threads=64' \
