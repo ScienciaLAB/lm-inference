@@ -62,7 +62,7 @@ def get_cost_per_second(gpu_type: str) -> float:
     return GPU_COST_PER_SECOND[gpu_type]
 
 # Modal class to manage the vLLM server lifecycle
-@app.cls(gpu="A10G",scaledown_window=300,max_containers=1,min_containers=1)
+@app.cls(gpu="A100-40GB",scaledown_window=300,max_containers=1,min_containers=1)
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
@@ -211,7 +211,7 @@ class DotsOCRService:
 shared_service = DotsOCRService()
 
     
-@app.function(gpu="A10G", timeout=1000 ,scaledown_window=300,max_containers=1)
+@app.function(gpu="A100-40GB", timeout=1000 ,scaledown_window=300,max_containers=1)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -235,13 +235,11 @@ async def parse_document_endpoint(request: Request):
 
         start_time = time.perf_counter()
 
-        # Make the remote call and wait for the result (this is where processing happens)
         results_future = shared_service.parse_document.remote(**parse_kwargs)
-        results = results_future.get(output_format) # This line blocks until processing is done
+        results = results_future.get(output_format) 
 
-        # Calculate duration and cost after processing is complete
         duration = time.perf_counter() - start_time
-        cost_per_sec = get_cost_per_second("A10G") # Use your specific GPU type
+        cost_per_sec = get_cost_per_second("A100_40GB") 
         NUM_GPUS_USED = 2  # 1 for the class, 1 for the endpoint
 
         total_cost = duration * cost_per_sec * NUM_GPUS_USED
@@ -250,11 +248,8 @@ async def parse_document_endpoint(request: Request):
             "cost_usd": round(total_cost, 6)
         }
 
-        # Log the calculated cost
         print(f"[COST_LOG] File: {original_filename}, Duration: {cost_result['duration_seconds']}s, Cost: ${cost_result['cost_usd']:.6f}")
 
-        # Optionally, return the cost info along with the results
-        # This returns a dictionary containing both the parsed results and the cost info
         return {
             "result": results,
             "cost_info": cost_result
