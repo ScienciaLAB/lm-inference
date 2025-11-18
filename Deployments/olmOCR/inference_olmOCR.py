@@ -56,8 +56,10 @@ app = modal.App("olmocr-v2-inference")
     volumes={MODEL_CACHE: VOLUME},
     timeout=1200,
     scaledown_window=300,
-    min_containers=1
+    min_containers=1,
+    max_containers=4
 )
+@modal.concurrent(max_inputs=4)  
 class OlmOcrService:
     @modal.enter()
     def start_vllm(self):
@@ -151,11 +153,13 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import PlainTextResponse
 
 @app.function(
-    gpu="A100-40GB",
-    image=image,
+        image=image,
+    cpu=2, memory=4096,  max_containers=10,
     volumes={MODEL_CACHE: VOLUME},
     timeout=1800, 
-    max_containers=1 
+)
+@modal.concurrent(
+    max_inputs=10
 )
 @modal.fastapi_endpoint(method="POST")
 async def upload(request: Request):
