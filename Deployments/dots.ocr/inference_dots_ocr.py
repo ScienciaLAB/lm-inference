@@ -62,7 +62,8 @@ def get_cost_per_second(gpu_type: str) -> float:
     return GPU_COST_PER_SECOND[gpu_type]
 
 # Modal class to manage the vLLM server lifecycle
-@app.cls(gpu="A100-40GB",scaledown_window=300,max_containers=1,min_containers=1)
+@app.cls(gpu="A100-40GB",scaledown_window=300,max_containers=4,min_containers=1)
+@modal.concurrent(max_inputs=4)  
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
@@ -74,16 +75,19 @@ class DotsOCRService:
             raise RuntimeError(f"Model path not found: {model_path}. "
                             "Check that download_model.py saved the model correctly.")
 
-        # Launch vLLM with the correct model directory
         self.server_process = subprocess.Popen([
-            "vllm", "serve",
-            model_path,
-            "--trust-remote-code",
-            "--gpu-memory-utilization", "0.95",
-            "--host", "0.0.0.0",
-            "--port", "8000",
-            "--served-model-name", "model" 
-        ])
+        "vllm", "serve",
+        model_path,
+        "--trust-remote-code",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--served-model-name", "model",
+        "--gpu-memory-utilization", "0.95",
+        "--tensor-parallel-size", "1",   # 1 GPU
+        "--max-num-batched-tokens", "8192"
+            ])
+
+
 
         print("Waiting for vLLM server to start...")
 
@@ -211,7 +215,10 @@ class DotsOCRService:
 shared_service = DotsOCRService()
 
     
-@app.function(gpu="A100-40GB", timeout=1000 ,scaledown_window=300,max_containers=1)
+@app.function(cpu=2, memory=4096, timeout=1000, max_containers=10)
+@modal.concurrent(
+    max_inputs=10
+)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -240,7 +247,7 @@ async def parse_document_endpoint(request: Request):
 
         duration = time.perf_counter() - start_time
         cost_per_sec = get_cost_per_second("A100_40GB") 
-        NUM_GPUS_USED = 2  # 1 for the class, 1 for the endpoint
+        NUM_GPUS_USED = 1
 
         total_cost = duration * cost_per_sec * NUM_GPUS_USED
         cost_result = {
