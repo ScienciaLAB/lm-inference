@@ -2,12 +2,6 @@
 
 This directory contains the Modal deployment configuration for the Docling document processing service.
 
-## Overview
-
-Docling is deployed on [Modal](https://modal.com) with GPU acceleration for high-performance document processing, including OCR, table extraction, image analysis, and more.
-
-**Deployment URL:** https://sana-khamaassi--docling-gpu.modal.run
-
 ## API Usage
 
 The deployment provides REST endpoints for document conversion. Below are common usage examples.
@@ -170,12 +164,5 @@ result = converter.convert("document.pdf")
 To deploy or update the service:
 
 ```bash
-modal deploy docling_server_dep.py
+modal deploy docling_server_inference.py
 ```
-
-## Troubleshooting
-
-- **Timeout issues**: Increase `STARTUP_TIMEOUT` for large documents
-- **Memory issues**: Check document size and complexity
-- **Model loading**: Models are pre-downloaded during deployment
-- **GPU availability**: Service may need time to warm up on first request
