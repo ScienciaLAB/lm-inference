@@ -77,6 +77,7 @@ MODEL_CHAT_TEMPLATE = "qwen2-vl"
     image=image,
     volumes=volumes,
 )
+@modal.concurrent(max_inputs=100)
 class Model:
     @modal.enter()  # what should a container do after it starts but before it gets input?
     def start_runtime(self):
@@ -171,11 +172,11 @@ class Model:
     def extract_pdf_pages(self, pdf_content: bytes, dpi: int = 150) -> dict:
         """
         Extract all pages from a PDF as images.
-        
+
         Args:
             pdf_content: PDF file content as bytes
             dpi: Resolution for image extraction (default: 150)
-        
+
         Returns:
             Dictionary containing extracted images and metadata for each page
         """
@@ -188,44 +189,49 @@ class Model:
             mat = fitz.Matrix(dpi/72, dpi/72)  # Scale factor for DPI
             pix = page.get_pixmap(matrix=mat)
             img_data = pix.tobytes("png")
-            
+
             return {
                 "page_num": page_num,
                 "image_base64": base64.b64encode(img_data).decode('utf-8'),
                 "width": pix.width,
                 "height": pix.height
             }
-        
+
         try:
-            # Load PDF from bytes
+            # We could use pdf2image as alternative
             pdf_doc = fitz.open(stream=pdf_content, filetype="pdf")
             total_pages = len(pdf_doc)
-            
+
             print(f"📄 Processing PDF with {total_pages} pages at {dpi} DPI")
-            
+
             # Extract all pages as images
             print("🖼️  Extracting pages as images...")
+            pdf_conversion_start = time.monotonic_ns()
             page_images = []
             for page_num in range(total_pages):
                 page_data = extract_page_as_image(pdf_doc, page_num, dpi)
                 page_images.append(page_data)
-            
+            pdf_conversion_time = (time.monotonic_ns() - pdf_conversion_start) / 1e9
+
             print(f"✅ Extracted {len(page_images)} page images")
-            
+            print(f"⏱️ PDF to image conversion took {round(pdf_conversion_time, 2)} seconds")
+
             # Close the PDF document
             pdf_doc.close()
-            
+
             return {
                 "success": True,
                 "pages": page_images,
-                "total_pages": total_pages
+                "total_pages": total_pages,
+                "pdf_conversion_time": round(pdf_conversion_time, 2)
             }
         except Exception as e:
             return {
                 "error": f"PDF processing failed: {str(e)}",
                 "success": False,
                 "pages": [],
-                "total_pages": 0
+                "total_pages": 0,
+                "pdf_conversion_time": 0
             }
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
@@ -308,7 +314,8 @@ class Model:
             "dpi": dpi,
             "extracted_text": extracted_texts,
             "combined_text": all_text,
-            "success": True
+            "success": True,
+            "pdf_conversion_time": extraction_result.get("pdf_conversion_time", 0)
         }
         
         print(f"✅ PDF processing completed. Combined text length: {len(all_text)} characters")
