@@ -28,6 +28,13 @@ Each model is deployed as an independent **Modal app**.
 | **[OLMOCR](./Deployments/olmOCR)**             | OCR and text parsing model conversion of PDFs and other documents into plain text.        | https://github.com/allenai/olmocr                  |
 | **[Qwen2.5 VL](./Deployments/qwen)**           | Multimodal model for reasoning, summarization, and QA over document content.              | https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct |
 
+## 🧩 Lightweight Models (CPU-targeted)
+
+| Model                            | Description                                                                         | Link                                      |
+|----------------------------------|-------------------------------------------------------------------------------------|-------------------------------------------|
+| PaddlePaddle DocLayout (S, M, L) | Lightweight document layout analysis models for structure recognition and parsing.  | https://github.com/paddlepaddle/PaddleOCR |
+| PaddlePaddle Block               | Lightweight OCR model for text detection and recognition of main body of documents. |
+
 ---
 
 ## ⚙️ Deployment on Modal
