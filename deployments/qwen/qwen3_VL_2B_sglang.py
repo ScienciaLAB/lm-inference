@@ -1,3 +1,5 @@
+import asyncio
+import io
 import os
 import time
 from pathlib import Path
@@ -58,7 +60,7 @@ FAST_BOOT = True
 hf_cache_vol = modal.Volume.from_name("huggingface-cache", create_if_missing=True)
 app = modal.App("qwen-3-vl-2b-instruct-sglang")
 
-GPU_TYPE = os.environ.get("GPU_TYPE", "L40S")
+GPU_TYPE = os.environ.get("GPU_TYPE", "A100-80GB")
 GPU_COUNT = int(os.environ.get("GPU_COUNT", 1))
 
 GPU_CONFIG = f"{GPU_TYPE}:{GPU_COUNT}"
@@ -235,79 +237,80 @@ class Model:
             }
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
-    async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:  
+    async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:
         print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
-        
+
         # Read PDF content
         pdf_content = await pdf.read()
-        
+
+        overall_conversion_start = time.monotonic_ns()
+
         # Extract PDF pages
         extraction_result = self.extract_pdf_pages(pdf_content, dpi)
-        
+
         if not extraction_result["success"]:
             return {
-                "error": extraction_result["error"], 
-                "total_pages": 0, 
+                "error": extraction_result["error"],
+                "total_pages": 0,
                 "extracted_text": [],
                 "success": False
             }
-        
+
         pages = extraction_result["pages"]
-        
-        # Process each page with the model to extract text
+
+        image_conversion_time = (time.monotonic_ns() - overall_conversion_start) / 1e9
+        pdf_conversion_start = time.monotonic_ns()
+
         extracted_texts = []
-        
+
         import sglang as sgl
         import base64
-        
+
         # Set the default backend for this execution
         sgl.set_default_backend(self.runtime)
-        
-        for page_data in pages:
-            try:
-                # Save the image temporarily
-                temp_img_path = Path(f"/tmp/{uuid4()}.png")
-                img_data = base64.b64decode(page_data['image_base64'])
-                temp_img_path.write_bytes(img_data)
-                
-                # Extract text from this page using SGLang
-                @sgl.function
-                def extract_page_text(s, image_path):
-                    s += sgl.user(sgl.image(str(image_path)) + "Extract all text from this image. Provide the text in a clean, readable format without any additional commentary.")
-                    s += sgl.assistant(sgl.gen("extracted_text", max_tokens=2048))
 
-                state = extract_page_text.run(
-                    image_path=temp_img_path
-                )
-                
-                extracted_text = state["extracted_text"]
-                print(f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}...")  # First 100 chars
-                
+        tasks = []
+        for page_data in pages:
+            img_data = base64.b64decode(page_data['image_base64'])
+            image_binary = io.BytesIO(img_data)
+
+            image = UploadFile(filename=f"page_{page_data['page_num']}.png", file=image_binary)
+
+            task = self.generate.local(
+                image=image,
+                question="Extract all text from this image. Provide the text in a clean, readable format without any additional commentary."
+            )
+            tasks.append((task, page_data))
+
+        responses = await asyncio.gather(*[task for task, _ in tasks], return_exceptions=True)
+
+        for (task, page_data), response in zip(tasks, responses):
+            if isinstance(response, Exception):
+                print(f"❌ Error processing page {page_data['page_num'] + 1}: {str(response)}")
                 extracted_texts.append({
-                    "page_number": page_data["page_num"] + 1,  # 1-indexed for user
+                    "page_number": page_data["page_num"] + 1,
+                    "text": "",
+                    "error": str(response),
+                    "width": page_data["width"],
+                    "height": page_data["height"]
+                })
+            else:
+                extracted_text = response["answer"]  # generate() returns "answer", not "extracted_text"
+                print(f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}...")
+
+                extracted_texts.append({
+                    "page_number": page_data["page_num"] + 1,
                     "text": extracted_text,
                     "width": page_data["width"],
                     "height": page_data["height"]
                 })
-                
+
                 print(f"✅ Page {page_data['page_num'] + 1} processed successfully")
-                
-                # Clean up temporary file
-                temp_img_path.unlink(missing_ok=True)
-                
-            except Exception as e:
-                print(f"❌ Error processing page {page_data['page_num'] + 1}: {str(e)}")
-                extracted_texts.append({
-                    "page_number": page_data["page_num"] + 1,
-                    "text": "",
-                    "error": f"Page processing failed: {str(e)}",
-                    "width": page_data["width"],
-                    "height": page_data["height"]
-                })
-        
+
         # Combine all extracted text
         all_text = "\n\n".join([page.get("text", "") for page in extracted_texts if not page.get("error")])
-        
+
+        pdf_conversion_time = (time.monotonic_ns() - pdf_conversion_start) / 1e9
         result = {
             "filename": pdf.filename,
             "total_pages": len(pages),
@@ -315,9 +318,9 @@ class Model:
             "extracted_text": extracted_texts,
             "combined_text": all_text,
             "success": True,
-            "pdf_conversion_time": extraction_result.get("pdf_conversion_time", 0)
+            "pdf_conversion_time": pdf_conversion_time
         }
-        
+
         print(f"✅ PDF processing completed. Combined text length: {len(all_text)} characters")
         print(f"First 200 chars of combined text: {all_text[:200]}...")
         return result
