@@ -9,9 +9,21 @@ from fastapi import FastAPI, File, Request, UploadFile, HTTPException
 from fastapi.responses import PlainTextResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+# Modal GPU Pricing
+GPU_COST_PER_SECOND = {
+    "A10G": 0.000264,  
+    "A10": 0.000306,
+    "L4": 0.000222,
+    "L40S": 0.000542,
+    "A100_40GB": 0.000583,
+    "A100_80GB": 0.000694,
+    "H100": 0.001097,
+    "H200": 0.001261,
+    "B200": 0.001736,
+    "T4": 0.000164,
+}
 VOLUME = modal.Volume.from_name("olmocr-v2-cache", create_if_missing=True)
 MODEL_CACHE = "/model_cache"
-
 # Build image
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -25,8 +37,16 @@ image = (
         "fonts-liberation",
     )
     .run_commands("fc-cache -fv")
-    .pip_install("olmocr[gpu]", extra_index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install("olmocr[gpu]","fastapi",      
+        "uvicorn",  extra_index_url="https://download.pytorch.org/whl/cu128")
 )
+# cost calculation 
+def get_cost_per_second(gpu_type: str) -> float:
+    """Retrieves the cost per second for a given GPU type."""
+    if gpu_type not in GPU_COST_PER_SECOND:
+        available = ", ".join(GPU_COST_PER_SECOND.keys())
+        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
+    return GPU_COST_PER_SECOND[gpu_type]
 
 app = modal.App("olmocr-v2-inference")
 
@@ -36,8 +56,10 @@ app = modal.App("olmocr-v2-inference")
     volumes={MODEL_CACHE: VOLUME},
     timeout=1200,
     scaledown_window=300,
-    min_containers=1
+    min_containers=1,
+    max_containers=4
 )
+@modal.concurrent(max_inputs=4)  
 class OlmOcrService:
     @modal.enter()
     def start_vllm(self):
@@ -131,14 +153,21 @@ from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import PlainTextResponse
 
 @app.function(
-    gpu="A100-40GB",
-    image=image,
+        image=image,
+    cpu=2, memory=4096,  max_containers=10,
     volumes={MODEL_CACHE: VOLUME},
-    timeout=1800,  
+    timeout=1800, 
+)
+@modal.concurrent(
+    max_inputs=10
 )
 @modal.fastapi_endpoint(method="POST")
 async def upload(request: Request):
+    from starlette.datastructures import UploadFile as StarletteUploadFile
     try:
+        # Start timing immediately when request is received
+        start_time = time.perf_counter()
+
         form = await request.form()
         file = form.get("file")
         if not isinstance(file, StarletteUploadFile):
@@ -150,10 +179,29 @@ async def upload(request: Request):
 
         contents = await file.read()
 
-        # Call your Modal class method
-        markdown = await service.convert.remote.aio(contents, filename)
+        # Call the olmOCR v2 Modal service
+        results = await service.convert.remote.aio(contents, filename)
 
-        return PlainTextResponse(markdown)
+        # Stop timing after processing finishes
+        duration = time.perf_counter() - start_time
+
+        # Calculate cost
+        GPU_TYPE = "A100_40GB"
+        NUM_GPUS_USED = 2  # 1 for class, 1 for endpoint
+        cost_per_sec = get_cost_per_second(GPU_TYPE)
+        total_cost = duration * cost_per_sec * NUM_GPUS_USED
+        cost_info = {
+            "duration_seconds": round(duration, 2),
+            "cost_usd": round(total_cost, 6)
+        }
+
+        print(f"[COST_LOG] File: {filename}, Duration: {cost_info['duration_seconds']}s, Cost: ${cost_info['cost_usd']:.6f}")
+
+        # Return both the OCR result and cost info
+        return {
+            "result": results,
+            "cost_info": cost_info
+        }
 
     except Exception as e:
         print(f"Error in upload endpoint: {e}")

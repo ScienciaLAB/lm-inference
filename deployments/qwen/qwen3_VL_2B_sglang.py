@@ -13,10 +13,33 @@ flavor = "devel"
 operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
+# Modal GPU Pricing
+GPU_COST_PER_SECOND = {
+    "A10G": 0.000264,
+    "A10": 0.000306,
+    "L4": 0.000222,
+    "L40S": 0.000542,
+    "A100_40GB": 0.000583,
+    "A100_80GB": 0.000694,
+    "H100": 0.001097,
+    "H200": 0.001261,
+    "B200": 0.001736,
+    "T4": 0.000164,
+}
+
+
+# cost calculation
+def get_cost_per_second(gpu_type: str) -> float:
+    """Retrieves the cost per second for a given GPU type."""
+    if gpu_type not in GPU_COST_PER_SECOND:
+        available = ", ".join(GPU_COST_PER_SECOND.keys())
+        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
+    return GPU_COST_PER_SECOND[gpu_type]
+
 
 image = (
     modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
-    .apt_install("libnuma-dev")  
+    .apt_install("libnuma-dev")
     .pip_install(
         # Core packages first
         "torch>=2.7.0,<2.8",
@@ -75,9 +98,10 @@ MODEL_CHAT_TEMPLATE = "qwen2-vl"
 @app.cls(
     gpu=GPU_CONFIG,
     timeout=20 * MINUTES,
-    scaledown_window=20 * MINUTES, 
+    scaledown_window=20 * MINUTES,
     image=image,
     volumes=volumes,
+    max_containers=4
 )
 @modal.concurrent(max_inputs=100)
 class Model:
@@ -96,7 +120,7 @@ class Model:
             MODEL_CHAT_TEMPLATE
         )
         sgl.set_default_backend(self.runtime)
-   
+
     @modal.fastapi_endpoint(method="POST", label="qwen-3-generate", docs=True)
     async def generate(self, question: str = Form(...), image: UploadFile = File(...)) -> dict:
         from pathlib import Path
@@ -117,7 +141,7 @@ class Model:
             s += sgl.assistant(sgl.gen("answer", max_tokens=1024))
 
         state = image_qa.run(
-            image_path=image_path, 
+            image_path=image_path,
             question=question
         )
 
@@ -238,6 +262,8 @@ class Model:
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
     async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:
+        overall_conversion_start = time.monotonic()
+
         print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
 
         # Read PDF content
@@ -249,11 +275,22 @@ class Model:
         extraction_result = self.extract_pdf_pages(pdf_content, dpi)
 
         if not extraction_result["success"]:
+            duration = time.monotonic() - overall_conversion_start
+            try:
+                cost_per_sec = get_cost_per_second(GPU_TYPE.upper())
+            except Exception:
+                cost_per_sec = 0.0
+            total_cost = duration * cost_per_sec
+
             return {
                 "error": extraction_result["error"],
                 "total_pages": 0,
                 "extracted_text": [],
-                "success": False
+                "success": False,
+                "cost_info": {
+                    "duration_seconds": round(duration, 2),
+                    "cost_usd": round(total_cost, 6)
+                }
             }
 
         pages = extraction_result["pages"]
@@ -321,8 +358,22 @@ class Model:
             "pdf_conversion_time": pdf_conversion_time
         }
 
+        overall_duration = time.monotonic() - overall_conversion_start
+        try:
+            cost_per_sec = get_cost_per_second(GPU_TYPE.upper())
+        except Exception:
+            cost_per_sec = 0.0
+        total_cost = overall_duration * cost_per_sec
+
+        result["cost_info"] = {
+            "duration_seconds": round(overall_duration, 2),
+            "cost_usd": round(total_cost, 6)
+        }
+
         print(f"✅ PDF processing completed. Combined text length: {len(all_text)} characters")
         print(f"First 200 chars of combined text: {all_text[:200]}...")
+        print(f"💰 Cost: {result['cost_info']}")
+
         return result
 
     @modal.exit()  # what should a container do before it shuts down?

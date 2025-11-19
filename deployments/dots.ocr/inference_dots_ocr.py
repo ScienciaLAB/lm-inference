@@ -6,7 +6,19 @@ import json
 from pathlib import Path
 import time
 from fastapi import HTTPException, Request, File, UploadFile
-
+# Modal GPU Pricing
+GPU_COST_PER_SECOND = {
+    "A10G": 0.000264,  
+    "A10": 0.000306,
+    "L4": 0.000222,
+    "L40S": 0.000542,
+    "A100_40GB": 0.000583,
+    "A100_80GB": 0.000694,
+    "H100": 0.001097,
+    "H200": 0.001261,
+    "B200": 0.001736,
+    "T4": 0.000164,
+}
 # Modal image with necessary dependencies
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11") 
@@ -41,9 +53,17 @@ image = (
 )
 
 app = modal.App("dots-ocr-vllm-official-app", image=image)
+# cost calculation 
+def get_cost_per_second(gpu_type: str) -> float:
+    """Retrieves the cost per second for a given GPU type."""
+    if gpu_type not in GPU_COST_PER_SECOND:
+        available = ", ".join(GPU_COST_PER_SECOND.keys())
+        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
+    return GPU_COST_PER_SECOND[gpu_type]
 
 # Modal class to manage the vLLM server lifecycle
-@app.cls(gpu="A10G",scaledown_window=300,min_containers=1)
+@app.cls(gpu="A100-40GB",scaledown_window=300,max_containers=4,min_containers=1)
+@modal.concurrent(max_inputs=4)  
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
@@ -55,16 +75,19 @@ class DotsOCRService:
             raise RuntimeError(f"Model path not found: {model_path}. "
                             "Check that download_model.py saved the model correctly.")
 
-        # Launch vLLM with the correct model directory
         self.server_process = subprocess.Popen([
-            "vllm", "serve",
-            model_path,
-            "--trust-remote-code",
-            "--gpu-memory-utilization", "0.95",
-            "--host", "0.0.0.0",
-            "--port", "8000",
-            "--served-model-name", "model" 
-        ])
+        "vllm", "serve",
+        model_path,
+        "--trust-remote-code",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--served-model-name", "model",
+        "--gpu-memory-utilization", "0.95",
+        "--tensor-parallel-size", "1",   # 1 GPU
+        "--max-num-batched-tokens", "8192"
+            ])
+
+
 
         print("Waiting for vLLM server to start...")
 
@@ -191,7 +214,11 @@ class DotsOCRService:
 
 shared_service = DotsOCRService()
 
-@app.function(gpu="A10G", timeout=1000 ,scaledown_window=300)
+    
+@app.function(cpu=2, memory=4096, timeout=1000, max_containers=10)
+@modal.concurrent(
+    max_inputs=10
+)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -205,16 +232,35 @@ async def parse_document_endpoint(request: Request):
         prompt_mode = form.get('prompt_mode', 'prompt_layout_all_en')
         num_threads = int(form.get('num_threads', '64'))
         output_format=form.get('output_format', 'json_content')
-        results_future = shared_service.parse_document.remote(
-            file_bytes=file_content,
-            original_filename=original_filename,
-            prompt_mode=prompt_mode,
-            num_threads=num_threads
-        )
 
-        # Return only the requested output
+        parse_kwargs = {
+            "file_bytes": file_content,
+            "original_filename": original_filename,
+            "prompt_mode": prompt_mode,
+            "num_threads": num_threads
+        }
+
+        start_time = time.perf_counter()
+
+        results_future = shared_service.parse_document.remote(**parse_kwargs)
         results = results_future.get(output_format) 
-        return results
+
+        duration = time.perf_counter() - start_time
+        cost_per_sec = get_cost_per_second("A100_40GB") 
+        NUM_GPUS_USED = 1
+
+        total_cost = duration * cost_per_sec * NUM_GPUS_USED
+        cost_result = {
+            "duration_seconds": round(duration, 2),
+            "cost_usd": round(total_cost, 6)
+        }
+
+        print(f"[COST_LOG] File: {original_filename}, Duration: {cost_result['duration_seconds']}s, Cost: ${cost_result['cost_usd']:.6f}")
+
+        return {
+            "result": results,
+            "cost_info": cost_result
+        }
 
     except ValueError:
         raise HTTPException(status_code=400, detail="num_threads must be an integer.")

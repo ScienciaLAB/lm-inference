@@ -17,7 +17,26 @@ flavor = "devel"  #  includes full CUDA toolkit
 operating_sys = "ubuntu22.04"
 tag = f"{cuda_version}-{flavor}-{operating_sys}"
 vllm_cache_vol = modal.Volume.from_name("vllm-cache", create_if_missing=True)
-
+# Modal GPU Pricing
+GPU_COST_PER_SECOND = {
+    "A10G": 0.000264,  
+    "A10": 0.000306,
+    "L4": 0.000222,
+    "L40S": 0.000542,
+    "A100_40GB": 0.000583,
+    "A100_80GB": 0.000694,
+    "H100": 0.001097,
+    "H200": 0.001261,
+    "B200": 0.001736,
+    "T4": 0.000164,
+}
+# cost calculation 
+def get_cost_per_second(gpu_type: str) -> float:
+    """Retrieves the cost per second for a given GPU type."""
+    if gpu_type not in GPU_COST_PER_SECOND:
+        available = ", ".join(GPU_COST_PER_SECOND.keys())
+        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
+    return GPU_COST_PER_SECOND[gpu_type]
 image = (
     modal.Image.from_registry(f"nvidia/cuda:{tag}", add_python="3.11")
     .apt_install("libnuma-dev")  
@@ -83,7 +102,9 @@ MODEL_CHAT_TEMPLATE = "qwen2-vl"
     scaledown_window=20 * MINUTES, 
     image=image,
     volumes=volumes,
+    max_containers=4
 )
+@modal.concurrent(max_inputs=4)  
 class Model:
     @modal.enter()  # what should a container do after it starts but before it gets input?
     def start_runtime(self):
@@ -237,22 +258,39 @@ class Model:
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
     async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:  
+        # Start timing
+        start_time = time.monotonic()
+
         print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
-        
+
         # Read PDF content
         pdf_content = await pdf.read()
         
         # Extract PDF pages
         extraction_result = self.extract_pdf_pages(pdf_content, dpi)
         
+        # ----- ERROR PATH (ADD COST INFO) -----
         if not extraction_result["success"]:
+            duration = time.monotonic() - start_time
+            try:
+                cost_per_sec = get_cost_per_second(GPU_TYPE.upper())
+            except Exception:
+                cost_per_sec = 0.0
+            total_cost = duration * cost_per_sec
+            
             return {
                 "error": extraction_result["error"], 
                 "total_pages": 0, 
                 "extracted_text": [],
-                "success": False
+                "combined_text": "",
+                "success": False,
+                "cost_info": {
+                    "duration_seconds": round(duration, 2),
+                    "cost_usd": round(total_cost, 6)
+                }
             }
-        
+        # --------------------------------------
+
         pages = extraction_result["pages"]
         
         # Process each page with the model to extract text
@@ -283,10 +321,10 @@ class Model:
                 )
                 
                 extracted_text = state["extracted_text"]
-                print(f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}...")  # First 100 chars
+                print(f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}...")
                 
                 extracted_texts.append({
-                    "page_number": page_data["page_num"] + 1,  # 1-indexed for user
+                    "page_number": page_data["page_num"] + 1,
                     "text": extracted_text,
                     "width": page_data["width"],
                     "height": page_data["height"]
@@ -318,10 +356,27 @@ class Model:
             "combined_text": all_text,
             "success": True
         }
-        
+
+        # ---------- ADD COST INFO (SUCCESS PATH) ----------
+        duration = time.monotonic() - start_time
+        try:
+            cost_per_sec = get_cost_per_second(GPU_TYPE.upper())
+        except Exception:
+            cost_per_sec = 0.0
+        total_cost = duration * cost_per_sec
+
+        result["cost_info"] = {
+            "duration_seconds": round(duration, 2),
+            "cost_usd": round(total_cost, 6)
+        }
+        # --------------------------------------------------
+
         print(f"✅ PDF processing completed. Combined text length: {len(all_text)} characters")
         print(f"First 200 chars of combined text: {all_text[:200]}...")
+        print(f"💰 Cost: {result['cost_info']}")
+        
         return result
+
 
     @modal.exit()  # what should a container do before it shuts down?
     def shutdown_runtime(self):
