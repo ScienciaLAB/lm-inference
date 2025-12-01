@@ -4,38 +4,24 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from transformers import AutoModel
+
 from base_inference import BaseDocumentProcessor
 
 
-class PaddleDocumentProcessor(BaseDocumentProcessor):
-    def __init__(self, model_name: str = "PP-DocLayout-S", dpi: int = 70, temp_dir: str = None,
+class LADaSDocumentProcessor(BaseDocumentProcessor):
+    def __init__(self, model_name: str = None, dpi: int = 70, temp_dir: str = None,
                  preload_model: bool = False):
         super().__init__(model_name, dpi, temp_dir, preload_model)
 
     def _load_model(self) -> None:
         if self.model is None:
-            from paddleocr import LayoutDetection
-
             print("Loading model...")
             start_time = time.time()
-            self.model = LayoutDetection(model_name=self.model_name)
+
+            self.model = AutoModel.from_pretrained(Path(self.model_name), from_pt=True)
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f} seconds")
-
-    def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
-        from pdf2image import convert_from_path
-
-        print(f"Converting PDF to images: {pdf_path}")
-        images = convert_from_path(pdf_path, dpi=self.dpi, thread_count=os.cpu_count())
-        image_paths = []
-
-        for i, image in enumerate(images, 1):
-            image_path = output_dir / f"page_{i:04d}.jpg"
-            image.save(image_path, 'JPEG')
-            image_paths.append(image_path)
-
-        print(f"Converted {len(images)} pages to images")
-        return image_paths
 
     def process(self, pdf_path: str, output_dir: Path) -> List[Dict]:
         self._load_model()
@@ -61,7 +47,6 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
             res.save_to_json(save_path=str(output_dir / f"{base_name}.json"))
 
         return output
-
 
     def process_document(self, pdf_path: str, output_dir: str = "output") -> Dict[str, Any]:
         if not os.path.exists(pdf_path):
@@ -172,10 +157,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process PDF documents with PaddleOCR layout detection')
     parser.add_argument('input', help='Input PDF document path')
     parser.add_argument('--output', '-o', default='output', help='Output directory for processed images and results')
-    parser.add_argument('--model-name',
-                        choices=['PP-DocLayout-L', 'PP-DocLayout-M', 'PP-DocLayout-S', 'PP-DocLayoutV2',
-                                 'PP-DocBlockLayout'],
-                        default='PP-DocLayout-S', help='Model name for layout detection (default: PP-DocLayout-S)')
+    parser.add_argument(
+        '--model-file',
+        required=True,
+        help='Model file for layout'
+    )
     parser.add_argument('--dpi', type=int, default=70, help='DPI for PDF to image conversion (default: 70)')
     parser.add_argument('--temp-dir', help='Temporary directory for processing (default: auto-generated)')
     parser.add_argument('--only',
@@ -191,8 +177,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    processor = DocumentProcessor(
-        model_name=args.model_name,
+    processor = LADaSDocumentProcessor(
+        model_name=args.model_file,
         dpi=args.dpi,
         temp_dir=args.temp_dir,
         preload_model=True
