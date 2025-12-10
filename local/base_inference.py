@@ -8,8 +8,13 @@ from paddleocr import LayoutDetection
 
 
 class BaseDocumentProcessor:
-    def __init__(self, model_name: str = None, dpi: int = 70, temp_dir: str = None,
-                 preload_model: bool = False):
+    def __init__(
+        self,
+        model_name: str = None,
+        dpi: int = 70,
+        temp_dir: str = None,
+        preload_model: bool = False,
+    ):
         self.model_name = model_name
         self.dpi = dpi
         self.model: Optional[Union[LayoutDetection, Any]] = None
@@ -31,7 +36,8 @@ class BaseDocumentProcessor:
         """Cleanup temporary directory when object is destroyed"""
         try:
             import shutil
-            if hasattr(self, 'temp_dir') and self.temp_dir.exists():
+
+            if hasattr(self, "temp_dir") and self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
                 print(f"Cleaned up temporary directory: {self.temp_dir}")
         except OSError:
@@ -44,7 +50,9 @@ class BaseDocumentProcessor:
         return doc_output_dir
 
     def _load_model(self) -> None:
-        raise NotImplementedError("Not implemented in the base class. Please implement in subclass.")
+        raise NotImplementedError(
+            "Not implemented in the base class. Please implement in subclass."
+        )
 
     def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
         from pdf2image import convert_from_path
@@ -56,7 +64,7 @@ class BaseDocumentProcessor:
         for i, image in enumerate(images, 1):
             image_path = output_dir / f"page_{i:04d}.jpg"
             # TODO: consider saving pngs
-            image.save(image_path, 'JPEG')
+            image.save(image_path, "JPEG")
             image_paths.append(image_path)
 
         print(f"Converted {len(images)} pages to images")
@@ -64,10 +72,18 @@ class BaseDocumentProcessor:
 
     def process(self, pdf_path: str, output_dir: Path) -> List[Dict]:
         self._load_model()
-        raise NotImplementedError("Not implemented in the base class. Please implement in subclass.")
+        raise NotImplementedError(
+            "Not implemented in the base class. Please implement in subclass."
+        )
 
-    def cleanup_temp_files(self, doc_output_dir: Path, main_output_dir: Path = None, cleanup_images: bool = False,
-                           cleanup_rename: bool = False, pdf_name: str = None) -> None:
+    def cleanup_temp_files(
+        self,
+        doc_output_dir: Path,
+        main_output_dir: Path = None,
+        cleanup_images: bool = False,
+        cleanup_rename: bool = False,
+        pdf_name: str = None,
+    ) -> None:
         """
         Clean up temporary files generated during processing
 
@@ -85,7 +101,9 @@ class BaseDocumentProcessor:
             # Rename aggregated JSON to PDF name if requested (before cleanup)
             if cleanup_rename and pdf_name and main_output_dir:
                 # Find the aggregated JSON file in main output directory
-                aggregated_files = list(main_output_dir.glob('aggregated_*_elements.json'))
+                aggregated_files = list(
+                    main_output_dir.glob("aggregated_*_elements.json")
+                )
                 if aggregated_files:
                     # Take the first aggregated file found
                     source_file = aggregated_files[0]
@@ -105,6 +123,9 @@ class BaseDocumentProcessor:
         except OSError as e:
             print(f"Error during cleanup: {str(e)}")
 
-    def process_document(self, pdf_path: str, output_dir: str = "output") -> Dict[str, Any]:
-        raise NotImplementedError("Not implemented in the base class. Please implement in subclass.")
-
+    def process_document(
+        self, pdf_path: str, output_dir: str = "output"
+    ) -> Dict[str, Any]:
+        raise NotImplementedError(
+            "Not implemented in the base class. Please implement in subclass."
+        )

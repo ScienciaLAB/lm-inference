@@ -5,13 +5,12 @@ import tempfile
 import os
 import time
 from pathlib import Path
-from fastapi import FastAPI, File, Request, UploadFile, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import Request, HTTPException
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 # Modal GPU Pricing
 GPU_COST_PER_SECOND = {
-    "A10G": 0.000264,  
+    "A10G": 0.000264,
     "A10": 0.000306,
     "L4": 0.000222,
     "L40S": 0.000542,
@@ -37,10 +36,16 @@ image = (
         "fonts-liberation",
     )
     .run_commands("fc-cache -fv")
-    .pip_install("olmocr[gpu]","fastapi",      
-        "uvicorn",  extra_index_url="https://download.pytorch.org/whl/cu128")
+    .pip_install(
+        "olmocr[gpu]",
+        "fastapi",
+        "uvicorn",
+        extra_index_url="https://download.pytorch.org/whl/cu128",
+    )
 )
-# cost calculation 
+
+
+# cost calculation
 def get_cost_per_second(gpu_type: str) -> float:
     """Retrieves the cost per second for a given GPU type."""
     if gpu_type not in GPU_COST_PER_SECOND:
@@ -48,7 +53,9 @@ def get_cost_per_second(gpu_type: str) -> float:
         raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
     return GPU_COST_PER_SECOND[gpu_type]
 
+
 app = modal.App("olmocr-v2-inference")
+
 
 @app.cls(
     gpu="A100-40GB",
@@ -57,29 +64,43 @@ app = modal.App("olmocr-v2-inference")
     timeout=1200,
     scaledown_window=300,
     min_containers=1,
-    max_containers=4
+    max_containers=4,
 )
-@modal.concurrent(max_inputs=4)  
+@modal.concurrent(max_inputs=4)
 class OlmOcrService:
     @modal.enter()
     def start_vllm(self):
         print("🚀 Starting vLLM server for olmOCR v2")
         os.environ["HF_HOME"] = MODEL_CACHE
-        self.vllm_proc = subprocess.Popen([
-            "vllm", "serve",
-            "allenai/olmOCR-2-7B-1025-FP8",
-            "--served-model-name", "olmocr",
-            "--max-model-len", "16384",
-            "--gpu-memory-utilization", "0.90",
-            "--port", "8000",
-            "--host", "0.0.0.0",
-             "--dtype", "auto",
-        ])
+        self.vllm_proc = subprocess.Popen(
+            [
+                "vllm",
+                "serve",
+                "allenai/olmOCR-2-7B-1025-FP8",
+                "--served-model-name",
+                "olmocr",
+                "--max-model-len",
+                "16384",
+                "--gpu-memory-utilization",
+                "0.90",
+                "--port",
+                "8000",
+                "--host",
+                "0.0.0.0",
+                "--dtype",
+                "auto",
+            ]
+        )
 
-        import httpx, time
-        for i in range(300): 
+        import httpx
+        import time
+
+        for i in range(300):
             try:
-                if httpx.get("http://localhost:8000/health", timeout=2).status_code == 200:
+                if (
+                    httpx.get("http://localhost:8000/health", timeout=2).status_code
+                    == 200
+                ):
                     print("✅ vLLM server ready!")
                     return
             except Exception:
@@ -91,8 +112,6 @@ class OlmOcrService:
 
     @modal.method()
     def convert(self, pdf_bytes: bytes, filename: str) -> str:
-        import tempfile
-        from pathlib import Path
         import subprocess
         import sys
         import json
@@ -106,28 +125,39 @@ class OlmOcrService:
             pdf_path.write_bytes(pdf_bytes)
 
             cmd = [
-                sys.executable, "-m", "olmocr.pipeline",
+                sys.executable,
+                "-m",
+                "olmocr.pipeline",
                 str(output_dir),
                 "--markdown",
-                "--pdfs", str(pdf_path),
-                "--server", "http://localhost:8000/v1",
-                "--model", "olmocr",
-                "--gpu-memory-utilization", "0.85",
-                "--max_model_len", "16384",
+                "--pdfs",
+                str(pdf_path),
+                "--server",
+                "http://localhost:8000/v1",
+                "--model",
+                "olmocr",
+                "--gpu-memory-utilization",
+                "0.85",
+                "--max_model_len",
+                "16384",
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode != 0:
-                raise RuntimeError(f"olmOCR failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
+                raise RuntimeError(
+                    f"olmOCR failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+                )
 
             # Locate the .jsonl result file
             results_dir = output_dir / "results"
             jsonl_files = list(results_dir.glob("*.jsonl"))
             if not jsonl_files:
-                raise FileNotFoundError("No .jsonl result file found in 'results' directory")
+                raise FileNotFoundError(
+                    "No .jsonl result file found in 'results' directory"
+                )
 
             jsonl_file = jsonl_files[0]
-            with open(jsonl_file, 'r', encoding='utf-8') as f:
+            with open(jsonl_file, "r", encoding="utf-8") as f:
                 first_line = f.readline().strip()
                 if not first_line:
                     raise ValueError("JSONL file is empty")
@@ -143,27 +173,25 @@ class OlmOcrService:
             markdown_text = record["text"]
             if not markdown_text.strip():
                 raise ValueError("Extracted markdown text is empty")
-            #print(markdown_text)
+            # print(markdown_text)
             return markdown_text
+
 
 # Shared instance
 service = OlmOcrService()
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import PlainTextResponse
 
 @app.function(
-        image=image,
-    cpu=2, memory=4096,  max_containers=10,
+    image=image,
+    cpu=2,
+    memory=4096,
+    max_containers=10,
     volumes={MODEL_CACHE: VOLUME},
-    timeout=1800, 
+    timeout=1800,
 )
-@modal.concurrent(
-    max_inputs=10
-)
+@modal.concurrent(max_inputs=10)
 @modal.fastapi_endpoint(method="POST")
 async def upload(request: Request):
-    from starlette.datastructures import UploadFile as StarletteUploadFile
     try:
         # Start timing immediately when request is received
         start_time = time.perf_counter()
@@ -174,7 +202,7 @@ async def upload(request: Request):
             raise HTTPException(status_code=400, detail="No valid 'file' uploaded")
 
         filename = file.filename or "unknown.pdf"
-        if not filename.lower().endswith(('.pdf', '.png', '.jpg', '.jpeg')):
+        if not filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
             raise HTTPException(status_code=400, detail="Only PDF/PNG/JPG allowed")
 
         contents = await file.read()
@@ -192,16 +220,15 @@ async def upload(request: Request):
         total_cost = duration * cost_per_sec * NUM_GPUS_USED
         cost_info = {
             "duration_seconds": round(duration, 2),
-            "cost_usd": round(total_cost, 6)
+            "cost_usd": round(total_cost, 6),
         }
 
-        print(f"[COST_LOG] File: {filename}, Duration: {cost_info['duration_seconds']}s, Cost: ${cost_info['cost_usd']:.6f}")
+        print(
+            f"[COST_LOG] File: {filename}, Duration: {cost_info['duration_seconds']}s, Cost: ${cost_info['cost_usd']:.6f}"
+        )
 
         # Return both the OCR result and cost info
-        return {
-            "result": results,
-            "cost_info": cost_info
-        }
+        return {"result": results, "cost_info": cost_info}
 
     except Exception as e:
         print(f"Error in upload endpoint: {e}")

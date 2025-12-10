@@ -64,17 +64,19 @@ image = (
         "requests>=2.32,<3.0",
         "hf-xet>=1.1.5,<1.2",
     )
-    .env({
-        "HF_HUB_ENABLE_HF_TRANSFER": "1",
-        "TOKENIZERS_PARALLELISM": "false",
-        "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512"
-    })
+    .env(
+        {
+            "HF_HUB_ENABLE_HF_TRANSFER": "1",
+            "TOKENIZERS_PARALLELISM": "false",
+            "PYTORCH_CUDA_ALLOC_CONF": "max_split_size_mb:512",
+        }
+    )
 )
 
 MODEL_PATH = "Qwen/Qwen3-VL-2B-Instruct"
 MODEL_REVISION = "89644892e4d85e24eaac8bacfd4f463576704203"
 
-MODEL_VOL_PATH = "/root/.cache/sgl"   # must be absolute!
+MODEL_VOL_PATH = "/root/.cache/sgl"  # must be absolute!
 MODEL_VOL = modal.Volume.from_name("sgl-cache", create_if_missing=True)
 volumes = {MODEL_VOL_PATH: MODEL_VOL}
 
@@ -101,7 +103,7 @@ MODEL_CHAT_TEMPLATE = "qwen2-vl"
     scaledown_window=20 * MINUTES,
     image=image,
     volumes=volumes,
-    max_containers=4
+    max_containers=4,
 )
 @modal.concurrent(max_inputs=100)
 class Model:
@@ -122,8 +124,9 @@ class Model:
         sgl.set_default_backend(self.runtime)
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-generate", docs=True)
-    async def generate(self, question: str = Form(...), image: UploadFile = File(...)) -> dict:
-        from pathlib import Path
+    async def generate(
+        self, question: str = Form(...), image: UploadFile = File(...)
+    ) -> dict:
         import sglang as sgl
 
         start = time.monotonic_ns()
@@ -140,10 +143,7 @@ class Model:
             s += sgl.user(sgl.image(str(image_path)) + question)
             s += sgl.assistant(sgl.gen("answer", max_tokens=1024))
 
-        state = image_qa.run(
-            image_path=image_path,
-            question=question
-        )
+        state = image_qa.run(image_path=image_path, question=question)
 
         print(
             f"request {request_id} completed in {round((time.monotonic_ns() - start) / 1e9, 2)} seconds"
@@ -155,12 +155,11 @@ class Model:
         return {
             "answer": state["answer"],
             "request_id": str(request_id),
-            "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
+            "processing_time": round((time.monotonic_ns() - start) / 1e9, 2),
         }
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-text", docs=True)
     async def extract_text_from_image(self, image: UploadFile = File(...)) -> dict:
-        from pathlib import Path
         import sglang as sgl
 
         start = time.monotonic_ns()
@@ -174,12 +173,13 @@ class Model:
 
         @sgl.function
         def extract_text(s, image_path):
-            s += sgl.user(sgl.image(str(image_path)) + "Extract all text from this image. Provide the text in a clean, readable format without any additional commentary.")
+            s += sgl.user(
+                sgl.image(str(image_path))
+                + "Extract all text from this image. Provide the text in a clean, readable format without any additional commentary."
+            )
             s += sgl.assistant(sgl.gen("extracted_text", max_tokens=2048))
 
-        state = extract_text.run(
-            image_path=image_path
-        )
+        state = extract_text.run(image_path=image_path)
 
         print(
             f"text extraction for request {request_id} completed in {round((time.monotonic_ns() - start) / 1e9, 2)} seconds"
@@ -192,7 +192,7 @@ class Model:
         return {
             "extracted_text": state["extracted_text"],
             "request_id": str(request_id),
-            "processing_time": round((time.monotonic_ns() - start) / 1e9, 2)
+            "processing_time": round((time.monotonic_ns() - start) / 1e9, 2),
         }
 
     def extract_pdf_pages(self, pdf_content: bytes, dpi: int = 150) -> dict:
@@ -212,15 +212,15 @@ class Model:
         def extract_page_as_image(pdf_doc, page_num, dpi):
             """Extract a single page as base64 image"""
             page = pdf_doc.load_page(page_num)
-            mat = fitz.Matrix(dpi/72, dpi/72)  # Scale factor for DPI
+            mat = fitz.Matrix(dpi / 72, dpi / 72)  # Scale factor for DPI
             pix = page.get_pixmap(matrix=mat)
             img_data = pix.tobytes("png")
 
             return {
                 "page_num": page_num,
-                "image_base64": base64.b64encode(img_data).decode('utf-8'),
+                "image_base64": base64.b64encode(img_data).decode("utf-8"),
                 "width": pix.width,
-                "height": pix.height
+                "height": pix.height,
             }
 
         try:
@@ -240,7 +240,9 @@ class Model:
             pdf_conversion_time = (time.monotonic_ns() - pdf_conversion_start) / 1e9
 
             print(f"✅ Extracted {len(page_images)} page images")
-            print(f"⏱️ PDF to image conversion took {round(pdf_conversion_time, 2)} seconds")
+            print(
+                f"⏱️ PDF to image conversion took {round(pdf_conversion_time, 2)} seconds"
+            )
 
             # Close the PDF document
             pdf_doc.close()
@@ -249,7 +251,7 @@ class Model:
                 "success": True,
                 "pages": page_images,
                 "total_pages": total_pages,
-                "pdf_conversion_time": round(pdf_conversion_time, 2)
+                "pdf_conversion_time": round(pdf_conversion_time, 2),
             }
         except Exception as e:
             return {
@@ -257,11 +259,13 @@ class Model:
                 "success": False,
                 "pages": [],
                 "total_pages": 0,
-                "pdf_conversion_time": 0
+                "pdf_conversion_time": 0,
             }
 
     @modal.fastapi_endpoint(method="POST", label="qwen-3-extract-pdf", docs=True)
-    async def extract_pdf(self, pdf: UploadFile = File(...), dpi: int = Form(150)) -> dict:
+    async def extract_pdf(
+        self, pdf: UploadFile = File(...), dpi: int = Form(150)
+    ) -> dict:
         overall_conversion_start = time.monotonic()
 
         print(f"📄 Processing PDF document {pdf.filename} with {dpi} DPI")
@@ -289,8 +293,8 @@ class Model:
                 "success": False,
                 "cost_info": {
                     "duration_seconds": round(duration, 2),
-                    "cost_usd": round(total_cost, 6)
-                }
+                    "cost_usd": round(total_cost, 6),
+                },
             }
 
         pages = extraction_result["pages"]
@@ -308,44 +312,60 @@ class Model:
 
         tasks = []
         for page_data in pages:
-            img_data = base64.b64decode(page_data['image_base64'])
+            img_data = base64.b64decode(page_data["image_base64"])
             image_binary = io.BytesIO(img_data)
 
-            image = UploadFile(filename=f"page_{page_data['page_num']}.png", file=image_binary)
+            image = UploadFile(
+                filename=f"page_{page_data['page_num']}.png", file=image_binary
+            )
 
             task = self.generate.local(
                 image=image,
-                question="Extract all text from this image. Provide the text in a clean, readable format without any additional commentary."
+                question="Extract all text from this image. Provide the text in a clean, readable format without any additional commentary.",
             )
             tasks.append((task, page_data))
 
-        responses = await asyncio.gather(*[task for task, _ in tasks], return_exceptions=True)
+        responses = await asyncio.gather(
+            *[task for task, _ in tasks], return_exceptions=True
+        )
 
         for (task, page_data), response in zip(tasks, responses):
             if isinstance(response, Exception):
-                print(f"❌ Error processing page {page_data['page_num'] + 1}: {str(response)}")
-                extracted_texts.append({
-                    "page_number": page_data["page_num"] + 1,
-                    "text": "",
-                    "error": str(response),
-                    "width": page_data["width"],
-                    "height": page_data["height"]
-                })
+                print(
+                    f"❌ Error processing page {page_data['page_num'] + 1}: {str(response)}"
+                )
+                extracted_texts.append(
+                    {
+                        "page_number": page_data["page_num"] + 1,
+                        "text": "",
+                        "error": str(response),
+                        "width": page_data["width"],
+                        "height": page_data["height"],
+                    }
+                )
             else:
-                extracted_text = response["answer"]  # generate() returns "answer", not "extracted_text"
-                print(f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}...")
+                extracted_text = response[
+                    "answer"
+                ]  # generate() returns "answer", not "extracted_text"
+                print(
+                    f"✅ Page {page_data['page_num'] + 1} extracted text: {extracted_text[:100]}..."
+                )
 
-                extracted_texts.append({
-                    "page_number": page_data["page_num"] + 1,
-                    "text": extracted_text,
-                    "width": page_data["width"],
-                    "height": page_data["height"]
-                })
+                extracted_texts.append(
+                    {
+                        "page_number": page_data["page_num"] + 1,
+                        "text": extracted_text,
+                        "width": page_data["width"],
+                        "height": page_data["height"],
+                    }
+                )
 
                 print(f"✅ Page {page_data['page_num'] + 1} processed successfully")
 
         # Combine all extracted text
-        all_text = "\n\n".join([page.get("text", "") for page in extracted_texts if not page.get("error")])
+        all_text = "\n\n".join(
+            [page.get("text", "") for page in extracted_texts if not page.get("error")]
+        )
 
         pdf_conversion_time = (time.monotonic_ns() - pdf_conversion_start) / 1e9
         result = {
@@ -355,7 +375,7 @@ class Model:
             "extracted_text": extracted_texts,
             "combined_text": all_text,
             "success": True,
-            "pdf_conversion_time": pdf_conversion_time
+            "pdf_conversion_time": pdf_conversion_time,
         }
 
         overall_duration = time.monotonic() - overall_conversion_start
@@ -367,10 +387,12 @@ class Model:
 
         result["cost_info"] = {
             "duration_seconds": round(overall_duration, 2),
-            "cost_usd": round(total_cost, 6)
+            "cost_usd": round(total_cost, 6),
         }
 
-        print(f"✅ PDF processing completed. Combined text length: {len(all_text)} characters")
+        print(
+            f"✅ PDF processing completed. Combined text length: {len(all_text)} characters"
+        )
         print(f"First 200 chars of combined text: {all_text[:200]}...")
         print(f"💰 Cost: {result['cost_info']}")
 
