@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from transformers import AutoModel
+from ultralytics import YOLO
 
 from base_inference import BaseDocumentProcessor
 
@@ -19,7 +19,7 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
             print("Loading model...")
             start_time = time.time()
 
-            self.model = AutoModel.from_pretrained(Path(self.model_name), from_pt=True)
+            self.model = YOLO(Path(self.model_name), verbose=True)
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f} seconds")
 
@@ -32,8 +32,7 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
         start_time = time.time()
         output = self.model.predict(
             image_path_strings,
-            batch_size=os.cpu_count(),
-            layout_nms=True
+            batch=os.cpu_count()
         )
         inference_time = time.time() - start_time
         print(f"Process completed in {inference_time:.2f} seconds")
@@ -43,8 +42,10 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
             res.page_index = i + 1
             base_name = f"res_{i}"
 
-            res.save_to_img(save_path=str(output_dir / f"{base_name}.jpg"))
-            res.save_to_json(save_path=str(output_dir / f"{base_name}.json"))
+            with open(output_dir / f"{base_name}.json", 'w', encoding='utf-8') as f:
+                f.write(res.to_json())
+
+            res.save(output_dir / f"{base_name}.jpg")
 
         return output
 
@@ -112,9 +113,8 @@ def load_transform_elements(
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        for element in data['boxes']:
-            coords = element.get('coordinate')
-            x1, y1, x2, y2 = coords
+        for element in data:
+            x1, y1, x2, y2 = element['box'].values()
             x = int(x1)
             y = int(y1)
             width = int(x2 - x1)
@@ -127,7 +127,8 @@ def load_transform_elements(
                 "y": y,
                 "width": width,
                 "height": height,
-                "type": element.get('label')
+                "type": element.get('name'),
+                "confidence": element.get('confidence')
             }
 
             standard_elements.append(standard_element)
@@ -154,7 +155,7 @@ def filter_and_aggregate(bounding_boxes: List[Dict[str, any]], type_aggregation:
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Process PDF documents with PaddleOCR layout detection')
+    parser = argparse.ArgumentParser(description='Process PDF documents with LADaS layout detection')
     parser.add_argument('input', help='Input PDF document path')
     parser.add_argument('--output', '-o', default='output', help='Output directory for processed images and results')
     parser.add_argument(
