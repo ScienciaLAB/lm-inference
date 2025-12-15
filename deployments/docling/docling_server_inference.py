@@ -1,4 +1,3 @@
-
 import modal
 from docling_serve.app import create_app
 import time
@@ -8,7 +7,6 @@ app = modal.App("docling-serve-modal")
 image = modal.Image.from_registry(
     "quay.io/docling-project/docling-serve-cu128:v1.7.0"
 ).run_commands("docling-tools models download --all")
-
 
 
 # GPU pricing per second (Modal)
@@ -24,6 +22,7 @@ GPU_COST_PER_SECOND = {
     "B200": 0.001736,
     "T4": 0.000164,
 }
+
 
 def get_cost_per_second(gpu_type: str) -> float:
     if gpu_type not in GPU_COST_PER_SECOND:
@@ -44,9 +43,10 @@ def get_cost_per_second(gpu_type: str) -> float:
 @modal.asgi_app()
 def docling_serve_fastapi_app_with_lifespan():
     from fastapi import Request, Response
+
     web_app = create_app()
 
-    GPU_TYPE = "A100_40GB"  
+    GPU_TYPE = "A100_40GB"
     COST_PER_SEC = get_cost_per_second(GPU_TYPE)
 
     @web_app.middleware("http")
