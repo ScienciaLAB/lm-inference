@@ -1,4 +1,3 @@
-
 import modal
 from docling_serve.app import create_app
 
