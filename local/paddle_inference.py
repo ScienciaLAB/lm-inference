@@ -225,7 +225,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    processor = DocumentProcessor(
+    processor = PaddleDocumentProcessor(
         model_name=args.model_name,
         dpi=args.dpi,
         temp_dir=args.temp_dir,

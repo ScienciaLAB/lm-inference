@@ -299,7 +299,7 @@ class Model:
 
         pages = extraction_result["pages"]
 
-        image_conversion_time = (time.monotonic_ns() - overall_conversion_start) / 1e9
+        # image_conversion_time = (time.monotonic_ns() - overall_conversion_start) / 1e9
         pdf_conversion_start = time.monotonic_ns()
 
         extracted_texts = []
