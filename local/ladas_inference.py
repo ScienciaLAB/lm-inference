@@ -4,13 +4,15 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ultralytics import YOLO
+
 from base_inference import BaseDocumentProcessor
 
 
-class PaddleDocumentProcessor(BaseDocumentProcessor):
+class LADaSDocumentProcessor(BaseDocumentProcessor):
     def __init__(
         self,
-        model_name: str = "PP-DocLayout-S",
+        model_name: str = None,
         dpi: int = 70,
         temp_dir: str = None,
         preload_model: bool = False,
@@ -19,28 +21,12 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
 
     def _load_model(self) -> None:
         if self.model is None:
-            from paddleocr import LayoutDetection
-
             print("Loading model...")
             start_time = time.time()
-            self.model = LayoutDetection(model_name=self.model_name)
+
+            self.model = YOLO(Path(self.model_name), verbose=True)
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f} seconds")
-
-    def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
-        from pdf2image import convert_from_path
-
-        print(f"Converting PDF to images: {pdf_path}")
-        images = convert_from_path(pdf_path, dpi=self.dpi, thread_count=os.cpu_count())
-        image_paths = []
-
-        for i, image in enumerate(images, 1):
-            image_path = output_dir / f"page_{i:04d}.jpg"
-            image.save(image_path, "JPEG")
-            image_paths.append(image_path)
-
-        print(f"Converted {len(images)} pages to images")
-        return image_paths
 
     def process(self, pdf_path: str, output_dir: Path) -> List[Dict]:
         self._load_model()
@@ -49,9 +35,7 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
         image_path_strings = [str(path) for path in image_paths]
 
         start_time = time.time()
-        output = self.model.predict(
-            image_path_strings, batch_size=os.cpu_count(), layout_nms=True
-        )
+        output = self.model.predict(image_path_strings, batch=os.cpu_count())
         inference_time = time.time() - start_time
         print(f"Process completed in {inference_time:.2f} seconds")
 
@@ -60,8 +44,10 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
             res.page_index = i + 1
             base_name = f"res_{i}"
 
-            res.save_to_img(save_path=str(output_dir / f"{base_name}.jpg"))
-            res.save_to_json(save_path=str(output_dir / f"{base_name}.json"))
+            with open(output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
+                f.write(res.to_json())
+
+            res.save(output_dir / f"{base_name}.jpg")
 
         return output
 
@@ -133,9 +119,8 @@ def load_transform_elements(
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        for element in data["boxes"]:
-            coords = element.get("coordinate")
-            x1, y1, x2, y2 = coords
+        for element in data:
+            x1, y1, x2, y2 = element["box"].values()
             x = int(x1)
             y = int(y1)
             width = int(x2 - x1)
@@ -148,7 +133,8 @@ def load_transform_elements(
                 "y": y,
                 "width": width,
                 "height": height,
-                "type": element.get("label"),
+                "type": element.get("name"),
+                "confidence": element.get("confidence"),
             }
 
             standard_elements.append(standard_element)
@@ -177,7 +163,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Process PDF documents with PaddleOCR layout detection"
+        description="Process PDF documents with LADaS layout detection"
     )
     parser.add_argument("input", help="Input PDF document path")
     parser.add_argument(
@@ -186,18 +172,7 @@ if __name__ == "__main__":
         default="output",
         help="Output directory for processed images and results",
     )
-    parser.add_argument(
-        "--model-name",
-        choices=[
-            "PP-DocLayout-L",
-            "PP-DocLayout-M",
-            "PP-DocLayout-S",
-            "PP-DocLayoutV2",
-            "PP-DocBlockLayout",
-        ],
-        default="PP-DocLayout-S",
-        help="Model name for layout detection (default: PP-DocLayout-S)",
-    )
+    parser.add_argument("--model-file", required=True, help="Model file for layout")
     parser.add_argument(
         "--dpi",
         type=int,
@@ -225,8 +200,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    processor = PaddleDocumentProcessor(
-        model_name=args.model_name,
+    processor = LADaSDocumentProcessor(
+        model_name=args.model_file,
         dpi=args.dpi,
         temp_dir=args.temp_dir,
         preload_model=True,

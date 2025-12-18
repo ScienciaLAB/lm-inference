@@ -13,9 +13,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import threading
 
-# Import the DocumentProcessor class and filtering functions from the existing module
 from paddle_inference import (
-    DocumentProcessor,
+    PaddleDocumentProcessor,
     filter_and_aggregate,
     load_transform_elements,
 )
@@ -217,7 +216,7 @@ class BatchProcessor:
             # Create processor instances for each worker
             processors = []
             for _ in range(self.workers):
-                processor = DocumentProcessor(
+                processor = PaddleDocumentProcessor(
                     model_name=self.model_name,
                     dpi=self.dpi,
                     temp_dir=self.temp_dir,
