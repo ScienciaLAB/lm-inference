@@ -150,7 +150,7 @@ python paddle_inference_batch.py ./input_pdfs -o ./results --workers 4
 ```
 High-quality batch processing with filtering:
 ```shell
-python paddle_inference_batch.py ./input_pdfs -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
+python paddle_inference_batch.py ./input -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
 ```
 
 ---
@@ -161,9 +161,11 @@ Use `ladas_inference.py` to process PDF documents using the LADaS YOLO-based lay
 
 ## LADaS image Batch-Inference
 ```shell
- python ladas_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val_50DPI \  --output ./results/LADaS-50dpi \
-  --model-file ./LADaS/model-train-test.pt \
-  --workers 4
+ 
+python ladas_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val_36dpi \
+--output ./results/LADaS-36dpi \
+--model-file ./LADaS/model-train-test.pt \
+--workers 4
    ```
 
 #### Usage
