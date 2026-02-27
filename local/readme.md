@@ -138,15 +138,19 @@ Process all PDFs in a directory:
 ```shell
 python paddle_inference_batch.py ./input_pdfs --output ./results
 ```
+Process all images in a directory:
+
+```shell
+python paddle_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val -o ./results/PP-DocLayout-M --model-name PP-DocLayout-M --workers 4
+```
 
 Parallel processing with 4 workers:
 ```shell
 python paddle_inference_batch.py ./input_pdfs -o ./results --workers 4
 ```
-
 High-quality batch processing with filtering:
 ```shell
-python paddle_inference_batch.py ./input_pdfs -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
+python paddle_inference_batch.py ./input -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
 ```
 
 ---
@@ -155,11 +159,21 @@ python paddle_inference_batch.py ./input_pdfs -o ./results --model-name PP-DocLa
 
 Use `ladas_inference.py` to process PDF documents using the LADaS YOLO-based layout detection model.
 
-#### Usage
+## LADaS image Batch-Inference
+```shell
+ 
+python ladas_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val_36dpi \
+--output ./results/LADaS-36dpi \
+--model-file ./LADaS/model-train-test.pt \
+--workers 4
+   ```
 
+#### Usage
 ```shell
 python ladas_inference.py <input_pdf> --model-file <model_path> [options]
 ```
+
+
 
 #### Arguments
 
@@ -177,7 +191,7 @@ python ladas_inference.py <input_pdf> --model-file <model_path> [options]
 
 Basic usage with model file:
 ```shell
-python ladas_inference.py document.pdf --model-file ../../data/LADaS/model-train-test.pt
+python ladas_inference.py document.pdf --model-file ./LADaS/model-train-test.pt
 ```
 
 With output directory and filtering:

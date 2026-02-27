@@ -12,7 +12,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import threading
-
+import json
 from paddle_inference import (
     PaddleDocumentProcessor,
     filter_and_aggregate,
@@ -139,7 +139,11 @@ class BatchProcessor:
                         bounding_boxes = filter_and_aggregate(
                             bounding_boxes, grobid_type_aggregation
                         )
-
+                # Save the final aggregated JSON named after the PDF
+                pdf_name = Path(pdf_path).stem
+                final_json_path = os.path.join(result["main_output_dir"], f"{pdf_name}.json")
+                with open(final_json_path, 'w', encoding='utf-8') as f:
+                    json.dump(bounding_boxes, f, indent=4, ensure_ascii=False)
             # Apply cleanup if requested
             if result.get("success", False) and self.cleanup_images:
                 doc_output_dir = Path(result["output_dir"])
@@ -149,7 +153,7 @@ class BatchProcessor:
                     doc_output_dir,
                     main_output_dir,
                     cleanup_images=True,
-                    cleanup_rename=True,
+                    cleanup_rename=False,
                     pdf_name=pdf_name,
                 )
 
@@ -211,7 +215,6 @@ class BatchProcessor:
 
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}, DPI: {self.dpi}")
-            print("-" * 60)
 
             # Create processor instances for each worker
             processors = []
