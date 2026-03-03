@@ -7,19 +7,7 @@ from pathlib import Path
 import time
 from fastapi import HTTPException, Request
 
-# Modal GPU Pricing
-GPU_COST_PER_SECOND = {
-    "A10G": 0.000264,
-    "A10": 0.000306,
-    "L4": 0.000222,
-    "L40S": 0.000542,
-    "A100_40GB": 0.000583,
-    "A100_80GB": 0.000694,
-    "H100": 0.001097,
-    "H200": 0.001261,
-    "B200": 0.001736,
-    "T4": 0.000164,
-}
+from lm_inference_utils import get_cost_per_second
 # Modal image with necessary dependencies
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
@@ -58,15 +46,6 @@ image = (
 )
 
 app = modal.App("dots-ocr-vllm-official-app", image=image)
-
-
-# cost calculation
-def get_cost_per_second(gpu_type: str) -> float:
-    """Retrieves the cost per second for a given GPU type."""
-    if gpu_type not in GPU_COST_PER_SECOND:
-        available = ", ".join(GPU_COST_PER_SECOND.keys())
-        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
-    return GPU_COST_PER_SECOND[gpu_type]
 
 
 # Modal class to manage the vLLM server lifecycle

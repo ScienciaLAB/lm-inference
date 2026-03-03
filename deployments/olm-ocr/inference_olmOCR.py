@@ -8,19 +8,8 @@ from pathlib import Path
 from fastapi import Request, HTTPException
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
-# Modal GPU Pricing
-GPU_COST_PER_SECOND = {
-    "A10G": 0.000264,
-    "A10": 0.000306,
-    "L4": 0.000222,
-    "L40S": 0.000542,
-    "A100_40GB": 0.000583,
-    "A100_80GB": 0.000694,
-    "H100": 0.001097,
-    "H200": 0.001261,
-    "B200": 0.001736,
-    "T4": 0.000164,
-}
+from lm_inference_utils import get_cost_per_second
+
 VOLUME = modal.Volume.from_name("olmocr-v2-cache", create_if_missing=True)
 MODEL_CACHE = "/model_cache"
 # Build image
@@ -43,15 +32,6 @@ image = (
         extra_index_url="https://download.pytorch.org/whl/cu128",
     )
 )
-
-
-# cost calculation
-def get_cost_per_second(gpu_type: str) -> float:
-    """Retrieves the cost per second for a given GPU type."""
-    if gpu_type not in GPU_COST_PER_SECOND:
-        available = ", ".join(GPU_COST_PER_SECOND.keys())
-        raise ValueError(f"Unknown GPU type '{gpu_type}'. Available types: {available}")
-    return GPU_COST_PER_SECOND[gpu_type]
 
 
 app = modal.App("olmocr-v2-inference")

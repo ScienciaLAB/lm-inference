@@ -2,32 +2,13 @@ import modal
 from docling_serve.app import create_app
 import time
 
+from lm_inference_utils import get_cost_per_second
+
 app = modal.App("docling-serve-modal")
 
 image = modal.Image.from_registry(
     "quay.io/docling-project/docling-serve-cu128:v1.7.0"
 ).run_commands("docling-tools models download --all")
-
-
-# GPU pricing per second (Modal)
-GPU_COST_PER_SECOND = {
-    "A10G": 0.000264,
-    "A10": 0.000306,
-    "L4": 0.000222,
-    "L40S": 0.000542,
-    "A100_40GB": 0.000583,
-    "A100_80GB": 0.000694,
-    "H100": 0.001097,
-    "H200": 0.001261,
-    "B200": 0.001736,
-    "T4": 0.000164,
-}
-
-
-def get_cost_per_second(gpu_type: str) -> float:
-    if gpu_type not in GPU_COST_PER_SECOND:
-        raise ValueError(f"Unknown GPU type: {gpu_type}")
-    return GPU_COST_PER_SECOND[gpu_type]
 
 
 @app.function(
