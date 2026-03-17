@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from ultralytics import YOLO
 
 from base_inference import BaseDocumentProcessor
+from lm_inference_utils import filter_and_aggregate
 
 
 class LADaSDocumentProcessor(BaseDocumentProcessor):
@@ -140,23 +141,6 @@ def load_transform_elements(
             standard_elements.append(standard_element)
 
     return standard_elements
-
-
-def filter_and_aggregate(
-    bounding_boxes: List[Dict[str, any]], type_aggregation: Dict[str, List[str]]
-) -> List[Dict[str, Any]]:
-    inverted_dict = {}
-    for main_type, sub_types in type_aggregation.items():
-        for sub_type in sub_types:
-            inverted_dict[sub_type] = main_type
-
-    filtered_boxes = []
-    for b in bounding_boxes:
-        if b["type"] in inverted_dict:
-            b["type"] = inverted_dict[b["type"]]
-            filtered_boxes.append(b)
-
-    return filtered_boxes
 
 
 if __name__ == "__main__":

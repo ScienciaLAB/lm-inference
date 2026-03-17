@@ -15,9 +15,9 @@ import threading
 import json
 from paddle_inference import (
     PaddleDocumentProcessor,
-    filter_and_aggregate,
     load_transform_elements,
 )
+from lm_inference_utils import filter_and_aggregate
 
 
 class BatchProcessor:

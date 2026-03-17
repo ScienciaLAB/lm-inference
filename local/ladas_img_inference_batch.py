@@ -154,7 +154,7 @@ class LADaSBatchRunner:
             self.print_summary(total_time)
             return len(self.failed_files) == 0
 
-        except Exception as e:
+        except Exception:
             traceback.print_exc()
             return False
 
