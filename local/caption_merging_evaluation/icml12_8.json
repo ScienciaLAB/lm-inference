@@ -1,0 +1,29 @@
+[
+  {
+    "page": 8,
+    "x": 83.52,
+    "y": 115.2,
+    "width": 432.0,
+    "height": 513.36,
+    "type": "figure",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 201.6,
+    "y": 658.08,
+    "width": 192.96,
+    "height": 8.639999999999986,
+    "type": "figure_caption",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 83.52,
+    "y": 115.2,
+    "width": 432.0,
+    "height": 551.52,
+    "type": "figure_all",
+    "group": 1
+  }
+]

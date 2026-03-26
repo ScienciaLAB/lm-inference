@@ -1,0 +1,137 @@
+[
+  {
+    "page": 4,
+    "x": 241,
+    "y": 171,
+    "width": 794,
+    "height": 176,
+    "type": "figure",
+    "group": 1
+  },
+  {
+    "page": 4,
+    "x": 225,
+    "y": 377,
+    "width": 823,
+    "height": 64,
+    "type": "figure_caption",
+    "group": 1
+  },
+  {
+    "page": 4,
+    "x": 225,
+    "y": 171,
+    "width": 823,
+    "height": 270,
+    "type": "figure_all",
+    "group": 1
+  },
+  {
+    "page": 3,
+    "x": 327,
+    "y": 171,
+    "width": 616,
+    "height": 412,
+    "type": "figure",
+    "group": 2
+  },
+  {
+    "page": 3,
+    "x": 225,
+    "y": 610,
+    "width": 824,
+    "height": 68,
+    "type": "figure_caption",
+    "group": 2
+  },
+  {
+    "page": 3,
+    "x": 225,
+    "y": 171,
+    "width": 824,
+    "height": 507,
+    "type": "figure_all",
+    "group": 2
+  },
+  {
+    "page": 8,
+    "x": 283,
+    "y": 235,
+    "width": 704,
+    "height": 135,
+    "type": "table",
+    "group": 3
+  },
+  {
+    "page": 8,
+    "x": 225,
+    "y": 191,
+    "width": 823,
+    "height": 39,
+    "type": "table_caption",
+    "group": 3
+  },
+  {
+    "page": 8,
+    "x": 225,
+    "y": 191,
+    "width": 823,
+    "height": 179,
+    "type": "table_all",
+    "group": 3
+  },
+  {
+    "page": 7,
+    "x": 324,
+    "y": 489,
+    "width": 622,
+    "height": 87,
+    "type": "table",
+    "group": 4
+  },
+  {
+    "page": 7,
+    "x": 225,
+    "y": 399,
+    "width": 826,
+    "height": 84,
+    "type": "table_caption",
+    "group": 4
+  },
+  {
+    "page": 7,
+    "x": 225,
+    "y": 399,
+    "width": 826,
+    "height": 177,
+    "type": "table_all",
+    "group": 4
+  },
+  {
+    "page": 7,
+    "x": 382,
+    "y": 278,
+    "width": 506,
+    "height": 112,
+    "type": "table",
+    "group": 5
+  },
+  {
+    "page": 7,
+    "x": 225,
+    "y": 191,
+    "width": 824,
+    "height": 87,
+    "type": "table_caption",
+    "group": 5
+  },
+  {
+    "page": 7,
+    "x": 225,
+    "y": 191,
+    "width": 824,
+    "height": 199,
+    "type": "table_all",
+    "group": 5
+  }
+]

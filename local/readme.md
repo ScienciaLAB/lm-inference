@@ -1,6 +1,6 @@
 # Local Inference Scripts
 
-This directory contains scripts for running layout detection inference locally using PaddleOCR and LADaS (YOLO-based) models.
+This directory contains scripts for running layout detection inference locally using PaddleOCR and LADaS (YOLO-based) models, plus caption-to-figure/table linking and evaluation.
 
 ## Table of Contents
 
@@ -12,6 +12,9 @@ This directory contains scripts for running layout detection inference locally u
   - [Single Document Processing](#single-document-processing)
   - [Batch Processing](#batch-processing)
 - [LADaS Inference](#ladas-inference)
+- [Caption Merging](#caption-merging)
+  - [Strategies](#strategies)
+  - [Evaluation](#evaluation)
 - [Output Format](#output-format)
 - [Filtering Options](#filtering-options)
 
@@ -203,6 +206,64 @@ Full processing with cleanup:
 ```shell
 python ladas_inference.py document.pdf --model-file ./model.pt -o ./results --dpi 100 --only grobid --cleanup-images
 ```
+
+---
+
+## Caption Merging
+
+`caption_merging.py` links detected captions to their parent figures/tables and merges their bounding boxes into a single region. It provides a `CaptionMerger` base class (ABC) with two strategies.
+
+### Strategies
+
+| Strategy | Class | Description |
+|----------|-------|-------------|
+| `threshold` | `ThresholdMerger` | Requires horizontal overlap (same column) and a max distance threshold (default: 50). Only links above/below. |
+| `distance` | `DistanceMerger` | Considers all 4 directions (above, below, left, right). Ranks all valid candidates by distance and picks the closest. No hard threshold. |
+
+#### Usage
+
+```shell
+# Process JSON files using the distance strategy (default)
+python caption_merging.py input_dir/ -o output_dir/
+
+# Use the threshold strategy with custom max distance
+python caption_merging.py input_dir/ -o output_dir/ --strategy threshold --max-distance 80
+```
+
+### Evaluation
+
+`caption_merging_eval.py` benchmarks merging strategies against 150 annotated ground truth files in `caption_merging_evaluation/`. Each ground truth file contains figures, captions, and pre-computed merged boxes (`figure_all`/`table_all`) linked by a `group` field.
+
+The evaluation randomly shuffles input order across multiple trials to test robustness against the greedy processing order, then compares merged boxes to ground truth using IoU.
+
+#### Usage
+
+```shell
+# Evaluate all strategies (default)
+python caption_merging_eval.py caption_merging_evaluation/ -o results.json
+
+# Evaluate a single strategy
+python caption_merging_eval.py caption_merging_evaluation/ -o results.json --strategy distance
+
+# Custom parameters
+python caption_merging_eval.py caption_merging_evaluation/ -o results.json --strategy all --trials 10 --iou-threshold 0.9 --seed 42
+```
+
+#### Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `eval_dir` | Directory with ground truth JSON files | `./caption_merging_evaluation` |
+| `--output`, `-o` | Output JSON file for results (required) | - |
+| `--strategy`, `-s` | Strategy to evaluate: `threshold`, `distance`, or `all` | `all` |
+| `--max-distance`, `-d` | Max distance for ThresholdMerger | `50` |
+| `--trials`, `-t` | Number of random shuffle trials per file | `10` |
+| `--iou-threshold` | IoU threshold for counting a match as correct | `0.5` |
+| `--seed` | Random seed for reproducibility | `42` |
+
+#### Ground Truth Format
+
+Each JSON file in `caption_merging_evaluation/` is an array of elements with `page`, `x`, `y`, `width`, `height`, `type`, and `group` fields. Types include `figure`, `figure_caption`, `figure_all`, `table`, `table_caption`, `table_all`. The `group` field links a figure/table to its caption and the expected merged box.
 
 ---
 

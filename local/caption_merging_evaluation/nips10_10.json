@@ -1,0 +1,29 @@
+[
+  {
+    "page": 8,
+    "x": 115.2,
+    "y": 82.08,
+    "width": 381.6,
+    "height": 46.8,
+    "type": "table",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 108.0,
+    "y": 144.72,
+    "width": 394.56,
+    "height": 19.439999999999998,
+    "type": "table_caption",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 108.0,
+    "y": 82.08,
+    "width": 394.56,
+    "height": 82.08,
+    "type": "table_all",
+    "group": 1
+  }
+]

@@ -2,6 +2,7 @@
 Batch processing script for LADaS (YOLO) layout detection.
 Processes multiple PNG/JPG files in a directory using parallel workers.
 """
+
 import os
 import sys
 import argparse
@@ -29,7 +30,7 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
 
     def _load_model(self) -> None:
         if self.model is None:
-            self.model = YOLO(str(self.model_name), verbose=False) 
+            self.model = YOLO(str(self.model_name), verbose=False)
 
 
 class LADaSBatchRunner:
@@ -59,7 +60,7 @@ class LADaSBatchRunner:
         if not input_path.exists():
             raise ValueError(f"Input directory does not exist: {input_dir}")
 
-        extensions = ['*.png', '*.jpg', '*.jpeg', '*.PNG', '*.JPG']
+        extensions = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG"]
         for ext in extensions:
             image_files.extend(list(input_path.glob(ext)))
 
@@ -101,11 +102,16 @@ class LADaSBatchRunner:
             if success:
                 self.successful_files.append(img_path)
                 # Print every 5 files to reduce console spam
-                if self.processed_count % 5 == 0 or self.processed_count == self.total_files:
+                if (
+                    self.processed_count % 5 == 0
+                    or self.processed_count == self.total_files
+                ):
                     print(f"[{self.processed_count}/{self.total_files}] ✓ {img_name}")
             else:
                 self.failed_files.append((img_path, error_msg))
-                print(f"[{self.processed_count}/{self.total_files}] ✗ {img_name} - {error_msg}")
+                print(
+                    f"[{self.processed_count}/{self.total_files}] ✗ {img_name} - {error_msg}"
+                )
 
     def process_images(self, input_dir, output_dir):
         try:
@@ -123,7 +129,7 @@ class LADaSBatchRunner:
             for _ in range(self.workers):
                 proc = LADaSDocumentProcessor(
                     model_name=self.model_file,
-                    preload_model=False # Lazy load inside the thread
+                    preload_model=False,  # Lazy load inside the thread
                 )
                 processors.append(proc)
 
@@ -131,15 +137,15 @@ class LADaSBatchRunner:
 
             with ThreadPoolExecutor(max_workers=self.workers) as executor:
                 future_to_file = {}
-                
+
                 for i, img_path in enumerate(img_files):
                     assigned_processor = processors[i % self.workers]
-                    
+
                     future = executor.submit(
-                        self.process_single_image, 
-                        assigned_processor, 
-                        img_path, 
-                        output_dir
+                        self.process_single_image,
+                        assigned_processor,
+                        img_path,
+                        output_dir,
                     )
                     future_to_file[future] = img_path
                 for future in as_completed(future_to_file):
@@ -148,7 +154,9 @@ class LADaSBatchRunner:
                         _, success, error_msg, _ = future.result()
                         self.update_progress(success, img_path, error_msg)
                     except Exception as e:
-                        self.update_progress(False, img_path, f"Critical Thread Error: {e}")
+                        self.update_progress(
+                            False, img_path, f"Critical Thread Error: {e}"
+                        )
 
             total_time = time.time() - start_time
             self.print_summary(total_time)
@@ -166,7 +174,7 @@ class LADaSBatchRunner:
         print(f"Successful:  {len(self.successful_files)}")
         print(f"Failed:      {len(self.failed_files)}")
         print(f"Total time:  {total_time:.2f}s")
-        
+
         if self.total_files > 0:
             avg = total_time / self.total_files
             fps = self.total_files / total_time
@@ -182,24 +190,23 @@ class LADaSBatchRunner:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parallel LADaS (YOLO) Inference")
     parser.add_argument("input", help="Folder containing PNG/JPG images")
-    parser.add_argument("--output", "-o", default="output_ladas", help="Output directory")
-    parser.add_argument("--model-file", required=True, help="Path to .pt model file")
-    
     parser.add_argument(
-        "--workers", "-w", type=int, default=None, 
-        help="Number of threads. Default: CPU Count - 1. WARNING: High worker count on GPU may cause OOM."
+        "--output", "-o", default="output_ladas", help="Output directory"
+    )
+    parser.add_argument("--model-file", required=True, help="Path to .pt model file")
+
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=None,
+        help="Number of threads. Default: CPU Count - 1. WARNING: High worker count on GPU may cause OOM.",
     )
 
     args = parser.parse_args()
 
-    runner = LADaSBatchRunner(
-        model_file=args.model_file,
-        workers=args.workers
-    )
+    runner = LADaSBatchRunner(model_file=args.model_file, workers=args.workers)
 
-    success = runner.process_images(
-        input_dir=args.input, 
-        output_dir=args.output
-    )
+    success = runner.process_images(input_dir=args.input, output_dir=args.output)
 
     sys.exit(0 if success else 1)
