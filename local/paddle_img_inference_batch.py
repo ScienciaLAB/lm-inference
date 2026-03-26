@@ -15,6 +15,7 @@ import threading
 
 from paddle_inference import PaddleDocumentProcessor
 
+
 class ImageBatchProcessor:
     def __init__(
         self,
@@ -43,7 +44,7 @@ class ImageBatchProcessor:
             raise ValueError(f"Input directory does not exist: {input_dir}")
 
         # Find PNG and JPG
-        extensions = ['*.png', '*.jpg', '*.jpeg', '*.PNG', '*.JPG']
+        extensions = ["*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG"]
         for ext in extensions:
             image_files.extend(list(input_path.glob(ext)))
 
@@ -68,7 +69,7 @@ class ImageBatchProcessor:
             # 2. Run Prediction directly on image path
             # layout_nms=True cleans up overlapping boxes
             preds = processor.model.predict([img_path], layout_nms=True)
-            
+
             result = preds[0]
 
             # Create a folder for this image
@@ -76,12 +77,15 @@ class ImageBatchProcessor:
             os.makedirs(img_output_dir, exist_ok=True)
 
             # Save Visual (Image with boxes) inside image folder
-            result.save_to_img(save_path=os.path.join(img_output_dir, f"{base_name}.jpg"))
+            result.save_to_img(
+                save_path=os.path.join(img_output_dir, f"{base_name}.jpg")
+            )
 
             # Save JSON (Coordinates) inside image folder
-            result.save_to_json(save_path=os.path.join(img_output_dir, f"{base_name}.json"))
+            result.save_to_json(
+                save_path=os.path.join(img_output_dir, f"{base_name}.json")
+            )
 
-            
             processing_time = time.time() - start_time
             return img_path, True, None, processing_time
 
@@ -104,7 +108,9 @@ class ImageBatchProcessor:
                     print(f"({self.processed_count}/{self.total_files}) ✓ {img_name}")
             else:
                 self.failed_files.append((img_path, error_msg))
-                print(f"({self.processed_count}/{self.total_files}) ✗ {img_name} - {error_msg}")
+                print(
+                    f"({self.processed_count}/{self.total_files}) ✗ {img_name} - {error_msg}"
+                )
 
     def process_images(self, input_dir, output_dir):
         """
@@ -128,8 +134,8 @@ class ImageBatchProcessor:
             for _ in range(self.workers):
                 processor = PaddleDocumentProcessor(
                     model_name=self.model_name,
-                    dpi=72, # Irrelevant for images, but required by init
-                    preload_model=True
+                    dpi=72,  # Irrelevant for images, but required by init
+                    preload_model=True,
                 )
                 processors.append(processor)
 
@@ -138,10 +144,10 @@ class ImageBatchProcessor:
             # Process files in parallel
             with ThreadPoolExecutor(max_workers=self.workers) as executor:
                 future_to_processor = {}
-                
+
                 for i, img_path in enumerate(img_files):
                     processor = processors[i % self.workers]
-                    
+
                     future = executor.submit(
                         self.process_single_image, processor, img_path, output_dir
                     )
@@ -153,7 +159,9 @@ class ImageBatchProcessor:
                         img_path, success, error_msg, processing_time = future.result()
                         self.update_progress(success, img_path, error_msg)
                     except Exception as e:
-                        self.update_progress(False, img_path, f"Unexpected error: {str(e)}")
+                        self.update_progress(
+                            False, img_path, f"Unexpected error: {str(e)}"
+                        )
 
             total_time = time.time() - start_time
             self.print_summary(total_time)
@@ -161,6 +169,7 @@ class ImageBatchProcessor:
 
         except Exception as e:
             import traceback
+
             print(f"Batch processing failed: {str(e)}")
             print(traceback.format_exc())
             return False
@@ -187,21 +196,26 @@ class ImageBatchProcessor:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process Images with PaddleOCR layout detection")
+    parser = argparse.ArgumentParser(
+        description="Process Images with PaddleOCR layout detection"
+    )
 
     parser.add_argument("input_dir", help="Input directory containing PNG/JPG files")
     parser.add_argument("--output", "-o", default="output", help="Output directory")
-    
+
     parser.add_argument(
         "--model-name",
         choices=["PP-DocLayout-L", "PP-DocLayout-M", "PP-DocLayout-S"],
         default="PP-DocLayout-S",
-        help="Model name"
+        help="Model name",
     )
 
     parser.add_argument(
-        "--workers", "-w", type=int, default=None,
-        help=f"Number of parallel workers (default: {cpu_count()})"
+        "--workers",
+        "-w",
+        type=int,
+        default=None,
+        help=f"Number of parallel workers (default: {cpu_count()})",
     )
 
     args = parser.parse_args()
@@ -213,6 +227,7 @@ def main():
 
     success = processor.process_images(args.input_dir, args.output)
     sys.exit(0 if success else 1)
+
 
 if __name__ == "__main__":
     main()

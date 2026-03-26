@@ -141,8 +141,10 @@ class BatchProcessor:
                         )
                 # Save the final aggregated JSON named after the PDF
                 pdf_name = Path(pdf_path).stem
-                final_json_path = os.path.join(result["main_output_dir"], f"{pdf_name}.json")
-                with open(final_json_path, 'w', encoding='utf-8') as f:
+                final_json_path = os.path.join(
+                    result["main_output_dir"], f"{pdf_name}.json"
+                )
+                with open(final_json_path, "w", encoding="utf-8") as f:
                     json.dump(bounding_boxes, f, indent=4, ensure_ascii=False)
             # Apply cleanup if requested
             if result.get("success", False) and self.cleanup_images:

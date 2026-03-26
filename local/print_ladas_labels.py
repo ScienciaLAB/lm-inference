@@ -1,10 +1,12 @@
 from pathlib import Path
 from ultralytics import YOLO
 import argparse
+
 """
 to run this script, use the following command in the terminal: 
 python print_ladas_labels.py --model path/to/your/model.pt
 """
+
 
 def main(model_path):
     # Load model
@@ -25,7 +27,9 @@ def main(model_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Print LADaS model output labels")
-    parser.add_argument("--model", required=True, help="Path to LADaS YOLO model file (.pt)")
+    parser.add_argument(
+        "--model", required=True, help="Path to LADaS YOLO model file (.pt)"
+    )
     args = parser.parse_args()
 
     main(args.model)
