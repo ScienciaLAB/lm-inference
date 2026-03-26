@@ -1,0 +1,56 @@
+[
+  {
+    "page": 8,
+    "x": 114.48,
+    "y": 82.08,
+    "width": 377.28,
+    "height": 106.56000000000002,
+    "type": "figure",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 108.0,
+    "y": 204.48000000000002,
+    "width": 396.0,
+    "height": 28.799999999999983,
+    "type": "figure_caption",
+    "group": 1
+  },
+  {
+    "page": 8,
+    "x": 108.0,
+    "y": 82.08,
+    "width": 396.0,
+    "height": 151.2,
+    "type": "figure_all",
+    "group": 1
+  },
+  {
+    "page": 7,
+    "x": 115.92,
+    "y": 82.8,
+    "width": 378.72,
+    "height": 105.84000000000002,
+    "type": "figure",
+    "group": 2
+  },
+  {
+    "page": 7,
+    "x": 108.0,
+    "y": 204.48000000000002,
+    "width": 396.0,
+    "height": 47.51999999999998,
+    "type": "figure_caption",
+    "group": 2
+  },
+  {
+    "page": 7,
+    "x": 108.0,
+    "y": 82.8,
+    "width": 396.0,
+    "height": 169.2,
+    "type": "figure_all",
+    "group": 2
+  }
+]
