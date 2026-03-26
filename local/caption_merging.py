@@ -2,163 +2,225 @@ import os
 import argparse
 import json
 from pathlib import Path
+from abc import ABC, abstractmethod
 
 
-def calculate_distance(parent, caption):
+
+class CaptionMerger(ABC):
+    @abstractmethod
+    def merge(self, parents, captions):
+        """
+        Link captions to parent elements and merge their bounding boxes.
+        
+        Args:
+            parents: list of figure/table dicts
+            captions: list of caption dicts
+        
+        Returns:
+            parents list with updated bounding boxes
+        """
+        raise NotImplementedError("Subclasses must implement merge()")
+
+
+
+# First approach: Simple threshold-based merger
+
+class ThresholdMerger(CaptionMerger):
     """
-    Calculate distance between parent and caption.
-    Handles: above, below, left, right positions.
-    
-    Returns:
-        (distance, position) if valid relationship
-        (None, None) if invalid (overlapping or diagonal)
+    Simple approach:
+    - Requires horizontal overlap (same column)
+    - Defined threshold: rejects captions beyond max_distance
     """
     
-    # Parent edges
-    p_top = parent["y"]
-    p_bottom = parent["y"] + parent["height"]
-    p_left = parent["x"]
-    p_right = parent["x"] + parent["width"]
+    def __init__(self, max_distance=50):
+        self.max_distance = max_distance
     
-    # Caption edges
-    c_top = caption["y"]
-    c_bottom = caption["y"] + caption["height"]
-    c_left = caption["x"]
-    c_right = caption["x"] + caption["width"]
+    def merge(self, parents, captions):
+        used_captions = set()
+        
+        for parent in parents:
+            page = parent["page"]
+            
+            parent_top = parent["y"]
+            parent_bottom = parent["y"] + parent["height"]
+            parent_left = parent["x"]
+            parent_right = parent["x"] + parent["width"]
+            
+            best_caption = None
+            best_distance = float('inf')
+            
+            for i, caption in enumerate(captions):
+                
+                if i in used_captions:
+                    continue
+                
+                if caption["page"] != page:
+                    continue
+                
+                caption_top = caption["y"]
+                caption_bottom = caption["y"] + caption["height"]
+                caption_left = caption["x"]
+                caption_right = caption["x"] + caption["width"]
+                
+                if caption_top >= parent_bottom:
+                    distance = caption_top - parent_bottom
+                elif caption_bottom <= parent_top:
+                    distance = parent_top - caption_bottom
+                else:
+                    continue
+                
+                #  threshold
+                if distance > self.max_distance:
+                    continue
+                
+                # Must have horizontal overlap
+                if caption_right < parent_left or caption_left > parent_right:
+                    continue
+                
+                if distance < best_distance:
+                    best_distance = distance
+                    best_caption = (i, caption)
+            
+            # Merge ONE best caption
+            if best_caption:
+                idx, caption = best_caption
+                used_captions.add(idx)
+                self._merge_boxes(parent, caption)
+        
+        return parents
     
-    # Check overlaps
-    # Horizontal overlap: caption and parent share some X range
-    h_overlap = (c_left < p_right) and (c_right > p_left)
+    def _merge_boxes(self, parent, caption):
+        """Merge two boxes into one (union)."""
+        p_x1 = parent["x"]
+        p_y1 = parent["y"]
+        p_x2 = parent["x"] + parent["width"]
+        p_y2 = parent["y"] + parent["height"]
+        
+        c_x1 = caption["x"]
+        c_y1 = caption["y"]
+        c_x2 = caption["x"] + caption["width"]
+        c_y2 = caption["y"] + caption["height"]
+        
+        parent["x"] = min(p_x1, c_x1)
+        parent["y"] = min(p_y1, c_y1)
+        parent["width"] = max(p_x2, c_x2) - parent["x"]
+        parent["height"] = max(p_y2, c_y2) - parent["y"]
+
+
+# Second approach: Distance-based merger 
+
+class DistanceMerger(CaptionMerger):
+    """
+    - Checks the 4 directions: above, below, left, right
+    - Uses horizontal/vertical overlap logic
+    - No hard threshold: ranks ALL candidates by distance
+    - Picks the closest valid caption per parent
+    """
     
-    # Vertical overlap: caption and parent share some Y range
-    v_overlap = (c_top < p_bottom) and (c_bottom > p_top)
+    def merge(self, parents, captions):
+        used_captions = set()
+        
+        for parent in parents:
+            page = parent["page"]
+            
+            candidates = []
+            
+            for i, caption in enumerate(captions):
+                
+                if i in used_captions:
+                    continue
+                
+                if caption["page"] != page:
+                    continue
+                
+                distance, position = self._calculate_distance(parent, caption)
+                
+                if distance is None:
+                    continue
+                
+                candidates.append({
+                    "index": i,
+                    "caption": caption,
+                    "distance": distance,
+                    "position": position
+                })
+            
+            if not candidates:
+                continue
+            
+            # Rank by distance, pick closest
+            candidates.sort(key=lambda x: x["distance"])
+            best = candidates[0]
+            
+            used_captions.add(best["index"])
+            self._merge_boxes(parent, best["caption"])
+        
+        return parents
     
-    # Both overlap = boxes intersect = invalid
-    if h_overlap and v_overlap:
+    def _calculate_distance(self, parent, caption):
+        """
+        Calculate distance between parent and caption.
+        Handles: above, below, left, right.
+        Returns (distance, position) or (None, None).
+        """
+        p_top = parent["y"]
+        p_bottom = parent["y"] + parent["height"]
+        p_left = parent["x"]
+        p_right = parent["x"] + parent["width"]
+        
+        c_top = caption["y"]
+        c_bottom = caption["y"] + caption["height"]
+        c_left = caption["x"]
+        c_right = caption["x"] + caption["width"]
+        
+        h_overlap = (c_left < p_right) and (c_right > p_left)
+        v_overlap = (c_top < p_bottom) and (c_bottom > p_top)
+        
+        # Boxes intersect
+        if h_overlap and v_overlap:
+            return None, None
+        
+        # Below
+        if h_overlap and c_top >= p_bottom:
+            return c_top - p_bottom, "below"
+        
+        # Above
+        if h_overlap and c_bottom <= p_top:
+            return p_top - c_bottom, "above"
+        
+        # Right
+        if v_overlap and c_left >= p_right:
+            return c_left - p_right, "right"
+        
+        # Left
+        if v_overlap and c_right <= p_left:
+            return p_left - c_right, "left"
+        
         return None, None
     
-    # BELOW: horizontal overlap + caption is under parent
-    if h_overlap and c_top >= p_bottom:
-        return c_top - p_bottom, "below"
-    
-    # ABOVE: horizontal overlap + caption is over parent
-    if h_overlap and c_bottom <= p_top:
-        return p_top - c_bottom, "above"
-    
-    # RIGHT: vertical overlap + caption is to the right of parent
-    if v_overlap and c_left >= p_right:
-        return c_left - p_right, "right"
-    
-    # LEFT: vertical overlap + caption is to the left of parent
-    if v_overlap and c_right <= p_left:
-        return p_left - c_right, "left"
-    
-    # No valid relationship (diagonal)
-    return None, None
+    def _merge_boxes(self, parent, caption):
+        """Merge two boxes into one (union)."""
+        p_x1 = parent["x"]
+        p_y1 = parent["y"]
+        p_x2 = parent["x"] + parent["width"]
+        p_y2 = parent["y"] + parent["height"]
+        
+        c_x1 = caption["x"]
+        c_y1 = caption["y"]
+        c_x2 = caption["x"] + caption["width"]
+        c_y2 = caption["y"] + caption["height"]
+        
+        parent["x"] = min(p_x1, c_x1)
+        parent["y"] = min(p_y1, c_y1)
+        parent["width"] = max(p_x2, c_x2) - parent["x"]
+        parent["height"] = max(p_y2, c_y2) - parent["y"]
 
 
-def link_and_merge(parents, captions):
-    """
-    For each parent (figure/table), find the nearest caption on same page.
-    Uses ranking approach - always picks the closest valid caption.
-    
-    Args:
-        parents: list of figure/table dicts with bounding boxes
-        captions: list of caption dicts with bounding boxes
-    
-    Returns:
-        parents list with merged bounding boxes (includes caption area)
-    """
-    
-    used_captions = set()
-    
-    for parent in parents:
-        page = parent["page"]
-        
-        # Collect ALL valid candidates
-        candidates = []
-        
-        for i, caption in enumerate(captions):
-            
-            # Skip if already used by another parent
-            if i in used_captions:
-                continue
-            
-            # Must be on same page
-            if caption["page"] != page:
-                continue
-            
-            # Calculate distance
-            distance, position = calculate_distance(parent, caption)
-            
-            # Skip invalid (overlapping or diagonal)
-            if distance is None:
-                continue
-            
-            candidates.append({
-                "index": i,
-                "caption": caption,
-                "distance": distance,
-                "position": position
-            })
-        
-        # No candidates found for this parent
-        if not candidates:
-            continue
-        
-        # Rank by distance (ascending), pick closest
-        candidates.sort(key=lambda x: x["distance"])
-        best = candidates[0]
-        
-        # Mark caption as used
-        used_captions.add(best["index"])
-        
-        # Merge bounding boxes
-        c = best["caption"]
-        
-        p_left = parent["x"]
-        p_top = parent["y"]
-        p_right = parent["x"] + parent["width"]
-        p_bottom = parent["y"] + parent["height"]
-        
-        c_left = c["x"]
-        c_top = c["y"]
-        c_right = c["x"] + c["width"]
-        c_bottom = c["y"] + c["height"]
-        
-        # New merged box
-        new_left = min(p_left, c_left)
-        new_top = min(p_top, c_top)
-        new_right = max(p_right, c_right)
-        new_bottom = max(p_bottom, c_bottom)
-        
-        # Update parent with merged box
-        parent["x"] = new_left
-        parent["y"] = new_top
-        parent["width"] = new_right - new_left
-        parent["height"] = new_bottom - new_top
-    
-    return parents
 
-
-def link_captions_and_merge(paddle_data):
+def link_captions_and_merge(paddle_data, merger: CaptionMerger):
     """
-    Links captions to their parent elements and merges bounding boxes.
-    
-    Separates elements by type:
-        - Figures: figure, image, chart
-        - Tables: table
-        - Figure captions: figure_title, chart_title
-        - Table captions: table_title
-        - Ignore areas: header, header_image, footer, number
-    
-    Args:
-        paddle_data: list of dicts from PaddlePaddle JSON
-    
-    Returns:
-        (figures, tables, ignore_areas) - all with merged bounding boxes
+    Separates elements by type, then uses the given merger strategy.
     """
-    
     figures = []
     tables = []
     figure_captions = []
@@ -168,51 +230,32 @@ def link_captions_and_merge(paddle_data):
     for item in paddle_data:
         item_type = item.get("type", "").lower()
         
-        # Figures/Charts/Images
         if item_type in ["figure", "image", "chart"]:
             figures.append(item.copy())
-        
-        # Tables
         elif item_type == "table":
             tables.append(item.copy())
-        
-        # Figure/Chart captions
         elif item_type in ["figure_title", "chart_title"]:
             figure_captions.append(item.copy())
-        
-        # Table captions
         elif item_type == "table_title":
             table_captions.append(item.copy())
-        
-        # Ignore areas
         elif item_type in ["header", "header_image", "footer", "number"]:
             ignore_areas.append(item.copy())
     
-    # Link captions to parents and merge boxes
-    figures = link_and_merge(figures, figure_captions)
-    tables = link_and_merge(tables, table_captions)
+    # Use the merger strategy
+    figures = merger.merge(figures, figure_captions)
+    tables = merger.merge(tables, table_captions)
     
     return figures, tables, ignore_areas
 
 
-def process_single_json(input_path, output_path):
-    """
-    Process one PaddlePaddle JSON file.
-    
-    Args:
-        input_path: path to input JSON
-        output_path: path to output JSON
-    
-    Returns:
-        (num_figures, num_tables, num_ignore) counts
-    """
+def process_single_json(input_path, output_path, merger: CaptionMerger):
+    """Process one JSON file using the given merger strategy."""
     
     with open(input_path, 'r', encoding='utf-8') as f:
         paddle_data = json.load(f)
     
-    figures, tables, ignore_areas = link_captions_and_merge(paddle_data)
+    figures, tables, ignore_areas = link_captions_and_merge(paddle_data, merger)
     
-    # Build output
     output_data = []
     
     for item in figures:
@@ -245,7 +288,6 @@ def process_single_json(input_path, output_path):
             "type": "ignore"
         })
     
-    # Sort by page, then y position
     output_data.sort(key=lambda x: (x["page"], x["y"]))
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -254,25 +296,36 @@ def process_single_json(input_path, output_path):
     return len(figures), len(tables), len(ignore_areas)
 
 
+# MAIN
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Process PaddlePaddle JSON: link captions to figures/tables and merge bounding boxes"
+        description="Link captions to figures/tables and merge bounding boxes"
+    )
+    parser.add_argument("input_dir", help="Folder containing PaddlePaddle JSONs")
+    parser.add_argument("--output", "-o", required=True, help="Output folder")
+    parser.add_argument(
+        "--strategy", "-s",
+        choices=["threshold", "distance"],
+        default="distance",
     )
     parser.add_argument(
-        "input_dir",
-        help="Folder containing PaddlePaddle JSON files"
-    )
-    parser.add_argument(
-        "--output", "-o",
-        required=True,
-        help="Output folder for processed JSON files"
+        "--max-distance", "-d",
+        type=int,
+        default=50,
     )
     args = parser.parse_args()
-
-    # Create output directory
+    
+    # Create the merger based on strategy choice
+    if args.strategy == "threshold":
+        merger = ThresholdMerger(max_distance=args.max_distance)
+        print(f"Strategy: THRESHOLD (max_distance={args.max_distance})")
+    else:
+        merger = DistanceMerger()
+        print("Strategy: DISTANCE (rank all, pick closest)")
+    
     os.makedirs(args.output, exist_ok=True)
     
-    # Find all JSON files
     json_files = sorted(Path(args.input_dir).glob("*.json"))
     
     if not json_files:
@@ -294,12 +347,12 @@ def main():
         output_file = Path(args.output) / json_file.name
         
         try:
-            n_fig, n_tab, n_ign = process_single_json(json_file, output_file)
+            n_fig, n_tab, n_ign = process_single_json(json_file, output_file, merger)
             total_figures += n_fig
             total_tables += n_tab
             total_ignore += n_ign
             success_count += 1
-            print(f" {json_file.name}: {n_fig} figures, {n_tab} tables, {n_ign} ignore")
+            print(f"✓ {json_file.name}: {n_fig} figures, {n_tab} tables, {n_ign} ignore")
         except Exception as e:
             error_count += 1
             print(f"✗ {json_file.name}: {e}")
