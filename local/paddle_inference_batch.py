@@ -11,7 +11,6 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count, set_start_method
 import json
-import gc
 
 # Per-process global, set once by _init_worker
 _worker_processor = None
