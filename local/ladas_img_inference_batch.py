@@ -13,24 +13,23 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
-from ultralytics import YOLO
+def _make_ladas_processor(model_file, preload=False):
+    """Lazily import and create a LADaSDocumentProcessor."""
+    from ultralytics import YOLO
 
-from base_inference import BaseDocumentProcessor
+    from .base_inference import BaseDocumentProcessor
 
+    class LADaSDocumentProcessor(BaseDocumentProcessor):
+        def __init__(self, model_name=None, dpi=70, temp_dir=None, preload_model=False):
+            super().__init__(model_name, dpi, temp_dir, preload_model)
 
-class LADaSDocumentProcessor(BaseDocumentProcessor):
-    def __init__(
-        self,
-        model_name: str = None,
-        dpi: int = 70,
-        temp_dir: str = None,
-        preload_model: bool = False,
-    ):
-        super().__init__(model_name, dpi, temp_dir, preload_model)
+        def _load_model(self):
+            if self.model is None:
+                self.model = YOLO(str(self.model_name), verbose=False)
 
-    def _load_model(self) -> None:
-        if self.model is None:
-            self.model = YOLO(str(self.model_name), verbose=False)
+    return LADaSDocumentProcessor(
+        model_name=model_file, preload_model=preload
+    )
 
 
 class LADaSBatchRunner:
@@ -38,17 +37,20 @@ class LADaSBatchRunner:
         self,
         model_file: str,
         workers: int = None,
+        force: bool = False,
     ):
         """
         Initialize the batch processor.
         """
         self.model_file = model_file
         self.workers = workers if workers else max(1, cpu_count() - 1)
+        self.force = force
         self.progress_lock = threading.Lock()
         self.processed_count = 0
         self.total_files = 0
         self.failed_files = []
         self.successful_files = []
+        self.skipped_files = []
 
     def discover_image_files(self, input_dir):
         """
@@ -116,9 +118,29 @@ class LADaSBatchRunner:
     def process_images(self, input_dir, output_dir):
         try:
             img_files = self.discover_image_files(input_dir)
-            self.total_files = len(img_files)
             os.makedirs(output_dir, exist_ok=True)
 
+            # Skip already-processed files unless --force
+            if not self.force:
+                remaining = []
+                for img_path in img_files:
+                    stem = Path(img_path).stem
+                    if Path(output_dir, f"{stem}.json").exists():
+                        self.skipped_files.append(img_path)
+                    else:
+                        remaining.append(img_path)
+                if self.skipped_files:
+                    print(
+                        f"Skipping {len(self.skipped_files)} already-processed "
+                        f"files (use --force to reprocess)"
+                    )
+                img_files = remaining
+
+            if not img_files:
+                print("Nothing to process.")
+                return True
+
+            self.total_files = len(img_files)
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_file}")
             print(f"Input: {input_dir}")
@@ -127,10 +149,7 @@ class LADaSBatchRunner:
             # We create one processor instance per worker to avoid race conditions.
             processors = []
             for _ in range(self.workers):
-                proc = LADaSDocumentProcessor(
-                    model_name=self.model_file,
-                    preload_model=False,  # Lazy load inside the thread
-                )
+                proc = _make_ladas_processor(self.model_file, preload=False)
                 processors.append(proc)
 
             start_time = time.time()
@@ -203,9 +222,17 @@ if __name__ == "__main__":
         help="Number of threads. Default: CPU Count - 1. WARNING: High worker count on GPU may cause OOM.",
     )
 
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess all files even if output already exists",
+    )
+
     args = parser.parse_args()
 
-    runner = LADaSBatchRunner(model_file=args.model_file, workers=args.workers)
+    runner = LADaSBatchRunner(
+        model_file=args.model_file, workers=args.workers, force=args.force
+    )
 
     success = runner.process_images(input_dir=args.input, output_dir=args.output)
 
