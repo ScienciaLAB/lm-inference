@@ -1,6 +1,8 @@
 # Local Inference Scripts
 
-This directory contains scripts for running layout detection inference locally using PaddleOCR and LADaS (YOLO-based) models, plus caption-to-figure/table linking and evaluation.
+Scripts for running layout detection inference locally using PaddleOCR and LADaS (YOLO-based) models, plus caption-to-figure/table linking and evaluation.
+
+All scripts are run as modules from the `lm-inference/` root directory using `python -m local.<script>`.
 
 ## Table of Contents
 
@@ -10,8 +12,11 @@ This directory contains scripts for running layout detection inference locally u
   - [LADaS (YOLO)](#ladas-yolo)
 - [Paddle Inference](#paddle-inference)
   - [Single Document Processing](#single-document-processing)
-  - [Batch Processing](#batch-processing)
+  - [Batch Processing (PDFs)](#batch-processing-pdfs)
+  - [Batch Processing (Images)](#batch-processing-images)
 - [LADaS Inference](#ladas-inference)
+  - [Single Document Processing](#single-document-processing-1)
+  - [Batch Processing (Images)](#batch-processing-images-1)
 - [Caption Merging](#caption-merging)
   - [Strategies](#strategies)
   - [Evaluation](#evaluation)
@@ -24,7 +29,7 @@ This directory contains scripts for running layout detection inference locally u
 
 ### PaddleOCR (CPU)
 
-Reference: https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/macos-pip_en.html 
+Reference: <https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/macos-pip_en.html>
 
 ```shell
 pip install paddlepaddle==3.2.0 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
@@ -41,6 +46,7 @@ pip install pdf2image
 ```
 
 > **Note:** You also need to install `poppler` for PDF to image conversion:
+>
 > - macOS: `brew install poppler`
 > - Ubuntu: `apt-get install poppler-utils`
 > - Windows: Download from [poppler releases](https://github.com/oschwartz10612/poppler-windows/releases)
@@ -60,12 +66,10 @@ pip install pdf2image
 
 ### Single Document Processing
 
-Use `paddle_inference.py` to process a single PDF document with PaddleOCR layout detection.
-
-#### Usage
+Use `paddle_inference` to process a single PDF document with PaddleOCR layout detection.
 
 ```shell
-python paddle_inference.py <input_pdf> [options]
+python -m local.paddle_inference <input_pdf> [options]
 ```
 
 #### Arguments
@@ -90,36 +94,21 @@ python paddle_inference.py <input_pdf> [options]
 
 #### Examples
 
-Basic usage:
 ```shell
-python paddle_inference.py document.pdf
-```
-
-Specify output directory and model:
-```shell
-python paddle_inference.py document.pdf --output ./results --model-name PP-DocLayout-L
-```
-
-Extract only display elements (figures, tables, equations) with cleanup:
-```shell
-python paddle_inference.py document.pdf -o ./results --only display --cleanup-images
-```
-
-High-resolution processing:
-```shell
-python paddle_inference.py document.pdf --dpi 150 --model-name PP-DocLayout-M
+python -m local.paddle_inference document.pdf
+python -m local.paddle_inference document.pdf --output ./results --model-name PP-DocLayout-L
+python -m local.paddle_inference document.pdf -o ./results --only display --cleanup-images
+python -m local.paddle_inference document.pdf --dpi 150 --model-name PP-DocLayout-M
 ```
 
 ---
 
-### Batch Processing
+### Batch Processing (PDFs)
 
-Use `paddle_inference_batch.py` to process multiple PDF documents in a directory with parallel workers.
-
-#### Usage
+Use `paddle_inference_batch` to process multiple PDF documents in a directory with parallel workers. Already-processed files (where `<name>.json` exists in the output directory) are skipped automatically.
 
 ```shell
-python paddle_inference_batch.py <input_dir> [options]
+python -m local.paddle_inference_batch <input_dir> [options]
 ```
 
 #### Arguments
@@ -130,53 +119,59 @@ python paddle_inference_batch.py <input_dir> [options]
 | `--output`, `-o` | Output directory for results | `output` |
 | `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
 | `--dpi` | DPI for PDF to image conversion | `70` |
-| `--workers`, `-w` | Number of parallel workers | CPU count |
+| `--workers`, `-w` | Number of parallel workers | CPU count (max 4) |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
 | `--only` | Filter output to specific element types | - |
 | `--cleanup-images` | Clean up intermediate files | `False` |
+| `--force` | Reprocess all files even if output already exists | `False` |
 
 #### Examples
 
-Process all PDFs in a directory:
 ```shell
-python paddle_inference_batch.py ./input_pdfs --output ./results
-```
-Process all images in a directory:
-
-```shell
-python paddle_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val -o ./results/PP-DocLayout-M --model-name PP-DocLayout-M --workers 4
+python -m local.paddle_inference_batch ./input_pdfs --output ./results
+python -m local.paddle_inference_batch ./input_pdfs -o ./results --workers 4
+python -m local.paddle_inference_batch ./input_pdfs -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
+python -m local.paddle_inference_batch ./input_pdfs -o ./results --force
 ```
 
-Parallel processing with 4 workers:
+---
+
+### Batch Processing (Images)
+
+Use `paddle_img_inference_batch` to process multiple PNG/JPG files with parallel workers. Already-processed files are skipped automatically.
+
 ```shell
-python paddle_inference_batch.py ./input_pdfs -o ./results --workers 4
+python -m local.paddle_img_inference_batch <input_dir> [options]
 ```
-High-quality batch processing with filtering:
+
+#### Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `input_dir` | Input directory containing PNG/JPG files (required) | - |
+| `--output`, `-o` | Output directory for results | `output` |
+| `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
+| `--workers`, `-w` | Number of parallel workers | CPU count |
+| `--force` | Reprocess all files even if output already exists | `False` |
+
+#### Examples
+
 ```shell
-python paddle_inference_batch.py ./input -o ./results --model-name PP-DocLayout-L --dpi 150 --only grobid --cleanup-images
+python -m local.paddle_img_inference_batch ./images -o ./results --model-name PP-DocLayout-M --workers 4
+python -m local.paddle_img_inference_batch ./images -o ./results --force
 ```
 
 ---
 
 ## LADaS Inference
 
-Use `ladas_inference.py` to process PDF documents using the LADaS YOLO-based layout detection model.
+### Single Document Processing
 
-## LADaS image Batch-Inference
-```shell
- 
-python ladas_img_inference_batch.py /Users/mandamac1/Downloads/grobid-alignment/data/paddle_LADaS/Doclaynet/PNG_val_36dpi \
---output ./results/LADaS-36dpi \
---model-file ./LADaS/model-train-test.pt \
---workers 4
-   ```
+Use `ladas_inference` to process PDF documents using the LADaS YOLO-based layout detection model.
 
-#### Usage
 ```shell
-python ladas_inference.py <input_pdf> --model-file <model_path> [options]
+python -m local.ladas_inference <input_pdf> --model-file <model_path> [options]
 ```
-
-
 
 #### Arguments
 
@@ -192,26 +187,44 @@ python ladas_inference.py <input_pdf> --model-file <model_path> [options]
 
 #### Examples
 
-Basic usage with model file:
 ```shell
-python ladas_inference.py document.pdf --model-file ./LADaS/model-train-test.pt
+python -m local.ladas_inference document.pdf --model-file ./LADaS/model-train-test.pt
+python -m local.ladas_inference document.pdf --model-file ./model.pt -o ./results --only display
+python -m local.ladas_inference document.pdf --model-file ./model.pt -o ./results --dpi 100 --only grobid --cleanup-images
 ```
 
-With output directory and filtering:
+---
+
+### Batch Processing (Images)
+
+Use `ladas_img_inference_batch` to process multiple PNG/JPG files with parallel workers. Already-processed files are skipped automatically.
+
 ```shell
-python ladas_inference.py document.pdf --model-file ./model.pt -o ./results --only display
+python -m local.ladas_img_inference_batch <input_dir> --model-file <model_path> [options]
 ```
 
-Full processing with cleanup:
+#### Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `input` | Folder containing PNG/JPG images (required) | - |
+| `--model-file` | Path to .pt model file (required) | - |
+| `--output`, `-o` | Output directory | `output_ladas` |
+| `--workers`, `-w` | Number of threads | CPU count - 1 |
+| `--force` | Reprocess all files even if output already exists | `False` |
+
+#### Examples
+
 ```shell
-python ladas_inference.py document.pdf --model-file ./model.pt -o ./results --dpi 100 --only grobid --cleanup-images
+python -m local.ladas_img_inference_batch ./images --output ./results/LADaS --model-file ./LADaS/model-train-test.pt --workers 4
+python -m local.ladas_img_inference_batch ./images -o ./results --model-file ./model.pt --force
 ```
 
 ---
 
 ## Caption Merging
 
-`caption_merging.py` links detected captions to their parent figures/tables and merges their bounding boxes into a single region. It provides a `CaptionMerger` base class (ABC) with two strategies.
+`caption_merging` links detected captions to their parent figures/tables and merges their bounding boxes into a single region. It provides a `CaptionMerger` base class (ABC) with two strategies.
 
 ### Strategies
 
@@ -220,33 +233,29 @@ python ladas_inference.py document.pdf --model-file ./model.pt -o ./results --dp
 | `threshold` | `ThresholdMerger` | Requires horizontal overlap (same column) and a max distance threshold (default: 50). Only links above/below. |
 | `distance` | `DistanceMerger` | Considers all 4 directions (above, below, left, right). Ranks all valid candidates by distance and picks the closest. No hard threshold. |
 
-#### Usage
-
 ```shell
 # Process JSON files using the distance strategy (default)
-python caption_merging.py input_dir/ -o output_dir/
+python -m local.caption_merging input_dir/ -o output_dir/
 
 # Use the threshold strategy with custom max distance
-python caption_merging.py input_dir/ -o output_dir/ --strategy threshold --max-distance 80
+python -m local.caption_merging input_dir/ -o output_dir/ --strategy threshold --max-distance 80
 ```
 
 ### Evaluation
 
-`caption_merging_eval.py` benchmarks merging strategies against 150 annotated ground truth files in `caption_merging_evaluation/`. Each ground truth file contains figures, captions, and pre-computed merged boxes (`figure_all`/`table_all`) linked by a `group` field.
+`caption_merging_eval` benchmarks merging strategies against 150 annotated ground truth files in `caption_merging_evaluation/`. Each ground truth file contains figures, captions, and pre-computed merged boxes (`figure_all`/`table_all`) linked by a `group` field.
 
 The evaluation randomly shuffles input order across multiple trials to test robustness against the greedy processing order, then compares merged boxes to ground truth using IoU.
 
-#### Usage
-
 ```shell
 # Evaluate all strategies (default)
-python caption_merging_eval.py caption_merging_evaluation/ -o results.json
+python -m local.caption_merging_eval caption_merging_evaluation/ -o results.json
 
 # Evaluate a single strategy
-python caption_merging_eval.py caption_merging_evaluation/ -o results.json --strategy distance
+python -m local.caption_merging_eval caption_merging_evaluation/ -o results.json --strategy distance
 
 # Custom parameters
-python caption_merging_eval.py caption_merging_evaluation/ -o results.json --strategy all --trials 10 --iou-threshold 0.9 --seed 42
+python -m local.caption_merging_eval caption_merging_evaluation/ -o results.json --strategy all --trials 10 --iou-threshold 0.9 --seed 42
 ```
 
 #### Arguments
@@ -281,14 +290,6 @@ Both Paddle and LADaS inference scripts produce a standardized JSON output forma
     "height": 300,
     "type": "figure",
     "confidence": 0.95
-  },
-  {
-    "page": 1,
-    "x": 50,
-    "y": 600,
-    "width": 500,
-    "height": 150,
-    "type": "table"
   }
 ]
 ```
@@ -312,7 +313,7 @@ Use the `--only` flag to filter and aggregate detected elements into specific ca
 | Option | Description | Included Types |
 |--------|-------------|----------------|
 | `display` | Display elements only | figure, image, chart, table, equation, formula |
-| `paratext` | Paratext elements only | header → headnote, footer |
+| `paratext` | Paratext elements only | header, footer |
 | `grobid` | Both display and paratext | All of the above |
 
 ### Type Aggregation
@@ -320,40 +321,33 @@ Use the `--only` flag to filter and aggregate detected elements into specific ca
 When using filters, similar element types are aggregated:
 
 **Display elements:**
-- `figure` ← figure, image, chart, figure_text, chart_text
-- `table` ← table, table_text
-- `equation` ← equation, formula, equation_text
+
+- `figure` <- figure, image, chart, figure_text, chart_text
+- `table` <- table, table_text
+- `equation` <- equation, formula, equation_text
 
 **Paratext elements:**
-- `headnote` ← header
-- `footer` ← footer
+
+- `headnote` <- header
+- `footer` <- footer
 
 ---
 
 ## Programmatic Usage
 
-You can also use the processors programmatically in your Python code:
-
-### PaddleDocumentProcessor
-
 ```python
-from paddle_inference import PaddleDocumentProcessor, load_transform_elements, filter_and_aggregate
+from local.paddle_inference import PaddleDocumentProcessor, load_transform_elements, filter_and_aggregate
 
-# Initialize processor
 processor = PaddleDocumentProcessor(
     model_name="PP-DocLayout-S",
     dpi=70,
     preload_model=True
 )
 
-# Process a document
 result = processor.process_document("document.pdf", "output")
 
 if result["success"]:
-    # Load and transform elements to standard format
     elements = load_transform_elements(result["output_dir"])
-    
-    # Optionally filter elements
     figure_types = {
         "figure": ["figure", "image", "chart"],
         "table": ["table"],
@@ -362,19 +356,15 @@ if result["success"]:
     filtered = filter_and_aggregate(elements, figure_types)
 ```
 
-### LADaSDocumentProcessor
-
 ```python
-from ladas_inference import LADaSDocumentProcessor, load_transform_elements
+from local.ladas_inference import LADaSDocumentProcessor, load_transform_elements
 
-# Initialize processor with model path
 processor = LADaSDocumentProcessor(
     model_name="path/to/model.pt",
     dpi=70,
     preload_model=True
 )
 
-# Process a document
 result = processor.process_document("document.pdf", "output")
 
 if result["success"]:
@@ -384,7 +374,7 @@ if result["success"]:
 
 ---
 
-## Directory Structure
+## Output Directory Structure
 
 After processing, the output directory will contain:
 
