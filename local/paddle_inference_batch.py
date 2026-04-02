@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Batch processing script for PaddleOCR layout detection.
 Processes multiple PDF documents in a directory using the DocumentProcessor class.
@@ -9,15 +8,113 @@ import sys
 import argparse
 import time
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from multiprocessing import cpu_count
-import threading
+from concurrent.futures import ProcessPoolExecutor, as_completed  
+from multiprocessing import cpu_count, set_start_method
 import json
+import gc
+
 from paddle_inference import (
     PaddleDocumentProcessor,
+    filter_and_aggregate,
     load_transform_elements,
 )
-from lm_inference_utils import filter_and_aggregate
+
+
+def process_single_pdf_worker(args):
+    """
+    Worker function for processing a single PDF.
+    Must be at module level for ProcessPoolExecutor to pickle it.
+    """
+    (pdf_path, output_dir, model_name, dpi, temp_dir, only, cleanup_images) = args
+    
+    start_time = time.time()
+
+    try:
+        processor = PaddleDocumentProcessor(
+            model_name=model_name,
+            dpi=dpi,
+            temp_dir=temp_dir,
+            preload_model=True,
+        )
+        
+        # Process the document
+        result = processor.process_document(pdf_path, output_dir)
+
+        # Apply filtering if requested
+        if result.get("success", False):
+            bounding_boxes = load_transform_elements(result["output_dir"])
+
+            if only:
+                figure_type_aggregation = {
+                    "figure": [
+                        "figure",
+                        "image",
+                        "chart",
+                        "figure_text",
+                        "chart_text",
+                    ],
+                    "table": ["table", "table_text"],
+                    "equation": ["equation", "formula", "equation_text"],
+                }
+
+                paratext_type_aggregation = {
+                    "headnote": ["header"],
+                    "footer": ["footer"],
+                }
+
+                if only == "display":
+                    bounding_boxes = filter_and_aggregate(
+                        bounding_boxes, figure_type_aggregation
+                    )
+                elif only == "paratext":
+                    bounding_boxes = filter_and_aggregate(
+                        bounding_boxes, paratext_type_aggregation
+                    )
+                elif only == "grobid":
+                    grobid_type_aggregation = {
+                        **figure_type_aggregation,
+                        **paratext_type_aggregation,
+                    }
+                    bounding_boxes = filter_and_aggregate(
+                        bounding_boxes, grobid_type_aggregation
+                    )
+                    
+            # Save the final aggregated JSON named after the PDF
+            pdf_name = Path(pdf_path).stem
+            final_json_path = os.path.join(result["main_output_dir"], f"{pdf_name}.json")
+            with open(final_json_path, 'w', encoding='utf-8') as f:
+                json.dump(bounding_boxes, f, indent=4, ensure_ascii=False)
+                
+        # Apply cleanup if requested
+        if result.get("success", False) and cleanup_images:
+            doc_output_dir = Path(result["output_dir"])
+            main_output_dir = Path(result["main_output_dir"])
+            pdf_name = Path(pdf_path).stem
+            processor.cleanup_temp_files(
+                doc_output_dir,
+                main_output_dir,
+                cleanup_images=True,
+                cleanup_rename=False,
+                pdf_name=pdf_name,
+            )
+
+        processing_time = time.time() - start_time
+        
+        # Cleanup
+        del processor
+        gc.collect()
+
+        if result.get("success", False):
+            return pdf_path, True, None, processing_time
+        else:
+            error_msg = result.get("error", "Unknown error")
+            return pdf_path, False, error_msg, processing_time
+
+    except Exception as e:
+
+        processing_time = time.time() - start_time
+        error_msg = f"Exception: {str(e)}"
+        return pdf_path, False, error_msg, processing_time
 
 
 class BatchProcessor:
@@ -44,10 +141,10 @@ class BatchProcessor:
         self.model_name = model_name
         self.dpi = dpi
         self.temp_dir = temp_dir
-        self.workers = workers if workers else cpu_count()
+        # Limit workers to avoid memory issues
+        self.workers = min(workers if workers else cpu_count(), 4)
         self.only = only
         self.cleanup_images = cleanup_images
-        self.progress_lock = threading.Lock()
         self.processed_count = 0
         self.total_files = 0
         self.failed_files = []
@@ -82,98 +179,6 @@ class BatchProcessor:
         print(f"Found {len(pdf_files)} PDF files to process")
         return sorted(pdf_files)
 
-    def process_single_document(self, processor, pdf_path, output_dir):
-        """
-        Process a single document using the provided processor.
-
-        Args:
-            processor (DocumentProcessor): Initialized document processor
-            pdf_path (str): Path to PDF file
-            output_dir (str): Output directory
-
-        Returns:
-            tuple: (pdf_path, success, error_message, processing_time)
-        """
-        start_time = time.time()
-        pdf_name = os.path.basename(pdf_path)
-
-        try:
-            # Process the document
-            result = processor.process_document(pdf_path, output_dir)
-
-            # Apply filtering if requested
-            if result.get("success", False):
-                bounding_boxes = load_transform_elements(result["output_dir"])
-
-                if self.only:
-                    figure_type_aggregation = {
-                        "figure": [
-                            "figure",
-                            "image",
-                            "chart",
-                            "figure_text",
-                            "chart_text",
-                        ],
-                        "table": ["table", "table_text"],
-                        "equation": ["equation", "formula", "equation_text"],
-                    }
-
-                    paratext_type_aggregation = {
-                        "headnote": ["header"],
-                        "footer": ["footer"],
-                    }
-
-                    if self.only == "display":
-                        bounding_boxes = filter_and_aggregate(
-                            bounding_boxes, figure_type_aggregation
-                        )
-                    elif self.only == "paratext":
-                        bounding_boxes = filter_and_aggregate(
-                            bounding_boxes, paratext_type_aggregation
-                        )
-                    elif self.only == "grobid":
-                        grobid_type_aggregation = {
-                            **figure_type_aggregation,
-                            **paratext_type_aggregation,
-                        }
-                        bounding_boxes = filter_and_aggregate(
-                            bounding_boxes, grobid_type_aggregation
-                        )
-                # Save the final aggregated JSON named after the PDF
-                pdf_name = Path(pdf_path).stem
-                final_json_path = os.path.join(
-                    result["main_output_dir"], f"{pdf_name}.json"
-                )
-                with open(final_json_path, "w", encoding="utf-8") as f:
-                    json.dump(bounding_boxes, f, indent=4, ensure_ascii=False)
-            # Apply cleanup if requested
-            if result.get("success", False) and self.cleanup_images:
-                doc_output_dir = Path(result["output_dir"])
-                main_output_dir = Path(result["main_output_dir"])
-                pdf_name = Path(pdf_path).stem
-                processor.cleanup_temp_files(
-                    doc_output_dir,
-                    main_output_dir,
-                    cleanup_images=True,
-                    cleanup_rename=False,
-                    pdf_name=pdf_name,
-                )
-
-            processing_time = time.time() - start_time
-
-            if result.get("success", False):
-                return pdf_path, True, None, processing_time
-            else:
-                error_msg = result.get("error", "Unknown error")
-                return pdf_path, False, error_msg, processing_time
-
-        except Exception as e:
-            import traceback
-
-            processing_time = time.time() - start_time
-            error_msg = f"Exception: {str(e)}\nStacktrace:\n{traceback.format_exc()}"
-            return pdf_path, False, error_msg, processing_time
-
     def update_progress(self, success, pdf_path, error_msg=None):
         """
         Update progress tracking.
@@ -183,18 +188,17 @@ class BatchProcessor:
             pdf_path (str): Path to processed PDF
             error_msg (str): Error message if processing failed
         """
-        with self.progress_lock:
-            self.processed_count += 1
-            pdf_name = os.path.basename(pdf_path)
+        self.processed_count += 1
+        pdf_name = os.path.basename(pdf_path)
 
-            if success:
-                self.successful_files.append(pdf_path)
-                print(f"({self.processed_count}/{self.total_files}) ✓ {pdf_name}")
-            else:
-                self.failed_files.append((pdf_path, error_msg))
-                print(
-                    f"({self.processed_count}/{self.total_files}) ✗ {pdf_name} - {error_msg}"
-                )
+        if success:
+            self.successful_files.append(pdf_path)
+            print(f"({self.processed_count}/{self.total_files}) ✓ {pdf_name}")
+        else:
+            self.failed_files.append((pdf_path, error_msg))
+            print(
+                f"({self.processed_count}/{self.total_files}) ✗ {pdf_name} - {error_msg}"
+            )
 
     def process_documents(self, input_dir, output_dir):
         """
@@ -218,33 +222,26 @@ class BatchProcessor:
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}, DPI: {self.dpi}")
 
-            # Create processor instances for each worker
-            processors = []
-            for _ in range(self.workers):
-                processor = PaddleDocumentProcessor(
-                    model_name=self.model_name,
-                    dpi=self.dpi,
-                    temp_dir=self.temp_dir,
-                    preload_model=True,
-                )
-                processors.append(processor)
+            # Prepare task arguments
+            tasks = [
+                (pdf_path, output_dir, self.model_name, self.dpi, 
+                 self.temp_dir, self.only, self.cleanup_images)
+                for pdf_path in pdf_files
+            ]
 
             start_time = time.time()
 
-            # Process files in parallel
-            with ThreadPoolExecutor(max_workers=self.workers) as executor:
+            # Process files in parallel using ProcessPoolExecutor
+            with ProcessPoolExecutor(max_workers=self.workers) as executor:
                 # Submit all tasks
-                future_to_processor = {}
-                for i, pdf_path in enumerate(pdf_files):
-                    processor = processors[i % self.workers]
-                    future = executor.submit(
-                        self.process_single_document, processor, pdf_path, output_dir
-                    )
-                    future_to_processor[future] = (pdf_path, processor)
+                future_to_pdf = {
+                    executor.submit(process_single_pdf_worker, task): task[0]
+                    for task in tasks
+                }
 
                 # Process completed tasks
-                for future in as_completed(future_to_processor):
-                    pdf_path, processor = future_to_processor[future]
+                for future in as_completed(future_to_pdf):
+                    pdf_path = future_to_pdf[future]
 
                     try:
                         pdf_path, success, error_msg, processing_time = future.result()
@@ -345,7 +342,7 @@ Examples:
         "-w",
         type=int,
         default=None,
-        help=f"Number of parallel workers (default: CPU count, {cpu_count()})",
+        help="Number of parallel workers (default: CPU count, max: 4)",
     )
 
     parser.add_argument(
@@ -388,4 +385,10 @@ Examples:
 
 
 if __name__ == "__main__":
+    # Set multiprocessing start method to 'spawn' for PaddlePaddle compatibility
+    try:
+        set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass
+    
     main()
