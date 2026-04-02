@@ -134,6 +134,7 @@ class BatchProcessor:
         workers=None,
         only=None,
         cleanup_images=False,
+        force=False,
     ):
         """
         Initialize the batch processor.
@@ -153,7 +154,9 @@ class BatchProcessor:
         self.workers = min(workers if workers else cpu_count(), 4)
         self.only = only
         self.cleanup_images = cleanup_images
+        self.force = force
         self.processed_count = 0
+        self.skipped_files = []
         self.total_files = 0
         self.failed_files = []
         self.successful_files = []
@@ -226,6 +229,28 @@ class BatchProcessor:
             # Create output directory if it doesn't exist
             os.makedirs(output_dir, exist_ok=True)
 
+            # Skip already-processed files unless --force
+            if not self.force:
+                remaining = []
+                for pdf_path in pdf_files:
+                    pdf_stem = Path(pdf_path).stem
+                    output_json = Path(output_dir) / f"{pdf_stem}.json"
+                    if output_json.exists():
+                        self.skipped_files.append(pdf_path)
+                    else:
+                        remaining.append(pdf_path)
+                if self.skipped_files:
+                    print(
+                        f"Skipping {len(self.skipped_files)} already-processed "
+                        f"files (use --force to reprocess)"
+                    )
+                pdf_files = remaining
+
+            if not pdf_files:
+                print("Nothing to process.")
+                return True
+
+            self.total_files = len(pdf_files)
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}, DPI: {self.dpi}")
 
@@ -377,6 +402,12 @@ Examples:
         "named after the input PDF (e.g., document.pdf → document.json)",
     )
 
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess all files even if output already exists",
+    )
+
     args = parser.parse_args()
 
     # Create and run batch processor
@@ -387,6 +418,7 @@ Examples:
         workers=args.workers,
         only=args.only,
         cleanup_images=args.cleanup_images,
+        force=args.force,
     )
 
     success = processor.process_documents(args.input_dir, args.output)

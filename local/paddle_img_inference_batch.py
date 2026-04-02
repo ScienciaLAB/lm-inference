@@ -13,25 +13,25 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import threading
 
-from paddle_inference import PaddleDocumentProcessor
-
-
 class ImageBatchProcessor:
     def __init__(
         self,
         model_name="PP-DocLayout-S",
         workers=None,
+        force=False,
     ):
         """
         Initialize the batch processor for images.
         """
         self.model_name = model_name
         self.workers = workers if workers else cpu_count()
+        self.force = force
         self.progress_lock = threading.Lock()
         self.processed_count = 0
         self.total_files = 0
         self.failed_files = []
         self.successful_files = []
+        self.skipped_files = []
 
     def discover_image_files(self, input_dir):
         """
@@ -119,17 +119,39 @@ class ImageBatchProcessor:
         try:
             # Discover files
             img_files = self.discover_image_files(input_dir)
-            self.total_files = len(img_files)
 
             # Create output directory
             os.makedirs(output_dir, exist_ok=True)
 
+            # Skip already-processed files unless --force
+            if not self.force:
+                remaining = []
+                for img_path in img_files:
+                    stem = Path(img_path).stem
+                    if Path(output_dir, stem, f"{stem}.json").exists():
+                        self.skipped_files.append(img_path)
+                    else:
+                        remaining.append(img_path)
+                if self.skipped_files:
+                    print(
+                        f"Skipping {len(self.skipped_files)} already-processed "
+                        f"files (use --force to reprocess)"
+                    )
+                img_files = remaining
+
+            if not img_files:
+                print("Nothing to process.")
+                return True
+
+            self.total_files = len(img_files)
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}")
             print(f"Target: {self.total_files} Images")
             print("-" * 60)
 
             # Create processor instances for each worker
+            from .paddle_inference import PaddleDocumentProcessor
+
             processors = []
             for _ in range(self.workers):
                 processor = PaddleDocumentProcessor(
@@ -218,11 +240,18 @@ def main():
         help=f"Number of parallel workers (default: {cpu_count()})",
     )
 
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Reprocess all files even if output already exists",
+    )
+
     args = parser.parse_args()
 
     processor = ImageBatchProcessor(
         model_name=args.model_name,
         workers=args.workers,
+        force=args.force,
     )
 
     success = processor.process_images(args.input_dir, args.output)
