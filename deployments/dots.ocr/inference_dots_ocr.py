@@ -8,6 +8,7 @@ import time
 from fastapi import HTTPException, Request
 
 from lm_inference_utils import get_cost_per_second
+
 # Modal image with necessary dependencies
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")

@@ -13,6 +13,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 
+
 def _make_ladas_processor(model_file, preload=False):
     """Lazily import and create a LADaSDocumentProcessor."""
     from ultralytics import YOLO
@@ -27,9 +28,7 @@ def _make_ladas_processor(model_file, preload=False):
             if self.model is None:
                 self.model = YOLO(str(self.model_name), verbose=False)
 
-    return LADaSDocumentProcessor(
-        model_name=model_file, preload_model=preload
-    )
+    return LADaSDocumentProcessor(model_name=model_file, preload_model=preload)
 
 
 class LADaSBatchRunner:

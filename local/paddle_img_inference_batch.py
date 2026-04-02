@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import threading
 
+
 class ImageBatchProcessor:
     def __init__(
         self,

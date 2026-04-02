@@ -8,7 +8,7 @@ import sys
 import argparse
 import time
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed  
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count, set_start_method
 import json
 import gc
@@ -430,8 +430,8 @@ Examples:
 if __name__ == "__main__":
     # Set multiprocessing start method to 'spawn' for PaddlePaddle compatibility
     try:
-        set_start_method('spawn', force=True)
+        set_start_method("spawn", force=True)
     except RuntimeError:
         pass
-    
+
     main()
