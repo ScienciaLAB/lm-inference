@@ -1,4 +1,4 @@
-pdf2image
-paddlepaddle>=2.4.0
-paddleocr[gpu]>=3.2.0
-ultralytics
+pdf2image==1.17.0
+paddlepaddle==3.2.0
+paddleocr[gpu]==3.4.0
+ultralytics>=8.3.0
