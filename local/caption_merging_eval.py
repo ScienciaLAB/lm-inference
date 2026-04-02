@@ -5,7 +5,7 @@ import random
 import statistics
 from pathlib import Path
 
-from caption_merging import DistanceMerger, ThresholdMerger
+from .caption_merging import DistanceMerger, ThresholdMerger
 
 STRATEGIES = {
     "threshold": lambda args: ThresholdMerger(max_distance=args.max_distance),

@@ -46,6 +46,19 @@ The `lm_inference_utils.py` module is imported directly as a flat module (no pac
 
 ---
 
+## Local Inference
+
+Scripts for running PaddleOCR and LADaS layout detection locally. All scripts are run as modules from this directory:
+
+```shell
+python -m local.paddle_inference_batch ./pdfs -o ./results
+python -m local.ladas_img_inference_batch ./images -o ./results --model-file ./model.pt
+```
+
+See [local/readme.md](local/readme.md) for full documentation, installation instructions, and all available options.
+
+---
+
 ## Deployment on Modal
 
 Each deployment folder includes:

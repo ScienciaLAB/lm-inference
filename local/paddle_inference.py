@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from base_inference import BaseDocumentProcessor
+from .base_inference import BaseDocumentProcessor
 from lm_inference_utils import filter_and_aggregate
 
 
