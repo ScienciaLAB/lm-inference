@@ -207,7 +207,7 @@ def link_captions_and_merge(paddle_data, merger: CaptionMerger):
     tables = []
     figure_captions = []
     table_captions = []
-    ignore_areas = []
+    paratext_areas = []
 
     for item in paddle_data:
         item_type = item.get("type", "").lower()
@@ -221,67 +221,59 @@ def link_captions_and_merge(paddle_data, merger: CaptionMerger):
         elif item_type == "table_title":
             table_captions.append(item.copy())
         elif item_type in ["header", "header_image", "footer", "number"]:
-            ignore_areas.append(item.copy())
+            paratext_areas.append(item.copy())
 
     # Use the merger strategy
     figures = merger.merge(figures, figure_captions)
     tables = merger.merge(tables, table_captions)
 
-    return figures, tables, ignore_areas
+    return figures, tables, paratext_areas
 
 
-def process_single_json(input_path, output_path, merger: CaptionMerger):
-    """Process one JSON file using the given merger strategy."""
+def _to_output_item(item, output_type):
+    return {
+        "page": int(item["page"]),
+        "x": int(item["x"]),
+        "y": int(item["y"]),
+        "width": int(item["width"]),
+        "height": int(item["height"]),
+        "type": output_type,
+    }
+
+
+def process_single_json(input_path, output_path, merger: CaptionMerger, only=None):
+    """Process one JSON file using the given merger strategy.
+
+    Args:
+        only: set of categories to include ("figure", "table", "paratext").
+              None means include all.
+    """
 
     with open(input_path, "r", encoding="utf-8") as f:
         paddle_data = json.load(f)
 
-    figures, tables, ignore_areas = link_captions_and_merge(paddle_data, merger)
+    figures, tables, paratext_areas = link_captions_and_merge(paddle_data, merger)
 
     output_data = []
 
-    for item in figures:
-        output_data.append(
-            {
-                "page": int(item["page"]),
-                "x": int(item["x"]),
-                "y": int(item["y"]),
-                "width": int(item["width"]),
-                "height": int(item["height"]),
-                "type": "figure",
-            }
-        )
+    if only is None or "figure" in only:
+        for item in figures:
+            output_data.append(_to_output_item(item, "figure"))
 
-    for item in tables:
-        output_data.append(
-            {
-                "page": int(item["page"]),
-                "x": int(item["x"]),
-                "y": int(item["y"]),
-                "width": int(item["width"]),
-                "height": int(item["height"]),
-                "type": "table",
-            }
-        )
+    if only is None or "table" in only:
+        for item in tables:
+            output_data.append(_to_output_item(item, "table"))
 
-    for item in ignore_areas:
-        output_data.append(
-            {
-                "page": int(item["page"]),
-                "x": int(item["x"]),
-                "y": int(item["y"]),
-                "width": int(item["width"]),
-                "height": int(item["height"]),
-                "type": "ignore",
-            }
-        )
+    if only is None or "paratext" in only:
+        for item in paratext_areas:
+            output_data.append(_to_output_item(item, "paratext"))
 
     output_data.sort(key=lambda x: (x["page"], x["y"]))
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output_data, f, indent=2)
 
-    return len(figures), len(tables), len(ignore_areas)
+    return len(figures), len(tables), len(paratext_areas)
 
 
 # MAIN
@@ -305,7 +297,21 @@ def main():
         type=int,
         default=50,
     )
+    parser.add_argument(
+        "--only",
+        help="Comma-separated list of categories to include in output: "
+        "figure, table, paratext (default: all)",
+    )
     args = parser.parse_args()
+
+    # Parse --only filter
+    only = None
+    if args.only:
+        valid = {"figure", "table", "paratext"}
+        only = {s.strip() for s in args.only.split(",")}
+        unknown = only - valid
+        if unknown:
+            parser.error(f"Unknown categories: {', '.join(unknown)}. Valid: {', '.join(sorted(valid))}")
 
     # Create the merger based on strategy choice
     if args.strategy == "threshold":
@@ -314,6 +320,9 @@ def main():
     else:
         merger = DistanceMerger()
         print("Strategy: DISTANCE (rank all, pick closest)")
+
+    if only:
+        print(f"Output filter: {', '.join(sorted(only))}")
 
     os.makedirs(args.output, exist_ok=True)
 
@@ -330,7 +339,7 @@ def main():
 
     total_figures = 0
     total_tables = 0
-    total_ignore = 0
+    total_paratext = 0
     success_count = 0
     error_count = 0
 
@@ -338,13 +347,13 @@ def main():
         output_file = Path(args.output) / json_file.name
 
         try:
-            n_fig, n_tab, n_ign = process_single_json(json_file, output_file, merger)
+            n_fig, n_tab, n_para = process_single_json(json_file, output_file, merger, only=only)
             total_figures += n_fig
             total_tables += n_tab
-            total_ignore += n_ign
+            total_paratext += n_para
             success_count += 1
             print(
-                f"✓ {json_file.name}: {n_fig} figures, {n_tab} tables, {n_ign} ignore"
+                f"✓ {json_file.name}: {n_fig} figures, {n_tab} tables, {n_para} paratext"
             )
         except Exception as e:
             error_count += 1
@@ -353,7 +362,7 @@ def main():
     print("-" * 60)
     print(f"DONE: {success_count} success, {error_count} errors")
     print(
-        f"TOTAL: {total_figures} figures, {total_tables} tables, {total_ignore} ignore"
+        f"TOTAL: {total_figures} figures, {total_tables} tables, {total_paratext} paratext"
     )
 
 

@@ -1,0 +1,6 @@
+# General dependencies
+modal==1.4.1
+python-dotenv==1.2.2
+
+# Docling dependencies
+docling-serve==1.15.1

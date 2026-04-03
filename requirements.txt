@@ -1,6 +1,0 @@
-# General dependencies
-modal
-python-dotenv
-
-# Docling dependencies
-docling-serve

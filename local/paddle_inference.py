@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from base_inference import BaseDocumentProcessor
+from .base_inference import BaseDocumentProcessor
 from lm_inference_utils import filter_and_aggregate
 
 
@@ -12,7 +12,7 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
     def __init__(
         self,
         model_name: str = "PP-DocLayout-S",
-        dpi: int = 70,
+        dpi: int = 72,
         temp_dir: str = None,
         preload_model: bool = False,
     ):
@@ -185,8 +185,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dpi",
         type=int,
-        default=70,
-        help="DPI for PDF to image conversion (default: 70)",
+        default=72,
+        help="DPI for PDF to image conversion (default: 72)",
     )
     parser.add_argument(
         "--temp-dir",
