@@ -34,9 +34,9 @@ The `lm_inference_utils.py` module is imported directly as a flat module (no pac
 |---|---|---|
 | **[Docling (Granite)](./deployments/docling)** | Document-level parser using Granite Docling for semantic structure and entity extraction. | https://github.com/docling-project/docling-serve |
 | **[Docling Serve (Granite)](./deployments/docling-serve-granite)** | Docling-serve deployment on Modal with Granite backend. | https://github.com/docling-project/docling-serve |
-| **[DoTS.OCR](./deployments/dots.ocr)** | Vision-Language OCR model for text extraction and layout-aware recognition. | https://github.com/rednote-hilab/dots.ocr |
+| **[DoTS.OCR](./deployments/dots_ocr)** | Vision-Language OCR model for text extraction and layout-aware recognition. | https://github.com/rednote-hilab/dots.ocr |
 | **[MinerU](./deployments/minerU)** | PDF document extraction and understanding. | https://github.com/opendatalab/MinerU |
-| **[OlmOCR](./deployments/olm-ocr)** | OCR and text parsing model conversion of PDFs and other documents into plain text. | https://github.com/allenai/olmocr |
+| **[OlmOCR](./deployments/olmo_ocr)** | OCR and text parsing model conversion of PDFs and other documents into plain text. | https://github.com/allenai/olmocr |
 | **[Qwen2.5 VL](./deployments/qwen)** | Multimodal model for reasoning, summarization, and QA over document content. | https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct |
 
 ## Lightweight Models (CPU-targeted)
@@ -63,7 +63,31 @@ See [local/readme.md](local/readme.md) for full documentation, installation inst
 
 ## Deployment on Modal
 
-Each deployment folder includes:
+All deployment commands must be run from the **repository root** (`lm-inference/`) so that `lm_inference_utils.py` is importable.
 
-- `model_name_inference.py` — the main Modal entrypoint
-- A `README.md` file containing example `curl` commands to interact with the deployed model
+### Prerequisites
+
+```shell
+pip install -r deployments/requirements.txt
+```
+
+### Deploy
+
+| Model | Command |
+|---|---|
+| Docling | `modal deploy deployments/docling/docling_server_inference.py` |
+| Docling Serve (Granite) | `uv run modal deploy deployments/docling-serve-granite/docling_server_inference.py` |
+| DoTS.OCR | `modal deploy deployments/dots_ocr/inference_dots_ocr.py` |
+| OlmOCR | `modal deploy deployments/olmo_ocr/inference_olmOCR.py` |
+| Qwen 2.5 VL 7B | `modal deploy deployments/qwen/qwen25_VL_7B_sglang.py` |
+| Qwen 3 VL 2B | `modal deploy deployments/qwen/qwen3_VL_2B_sglang.py` |
+
+### API Usage
+
+Each deployment folder contains a `README.md` with example `curl` commands for its endpoints. See:
+
+- [Docling](./deployments/docling/README.md)
+- [Docling Serve (Granite)](./deployments/docling-serve-granite/README.md)
+- [DoTS.OCR](./deployments/dots_ocr/readme.md)
+- [OlmOCR](./deployments/olmo_ocr/readme.md)
+- [Qwen](./deployments/qwen/readme.md)
