@@ -266,7 +266,7 @@ def process_single_json(input_path, output_path, merger: CaptionMerger, only=Non
 
     if only is None or "paratext" in only:
         for item in paratext_areas:
-            output_data.append(_to_output_item(item, "ignore"))
+            output_data.append(_to_output_item(item, "paratext"))
 
     output_data.sort(key=lambda x: (x["page"], x["y"]))
 
