@@ -224,7 +224,9 @@ python -m local.ladas_img_inference_batch ./images -o ./results --model-file ./m
 
 ## Caption Merging
 
-`caption_merging` links detected captions to their parent figures/tables and merges their bounding boxes into a single region. It provides a `CaptionMerger` base class (ABC) with two strategies.
+`caption_merging` filters raw PaddleOCR output to retain only **figures**, **tables**, and **paratext** (headers, footers, page numbers), discarding all other element types (text, titles, etc.). It then links detected captions to their parent figures/tables and merges their bounding boxes into a single region. In the output JSON, paratext elements are assigned type `"ignore"` for downstream use with GROBID's `typedAreas` API.
+
+It provides a `CaptionMerger` base class (ABC) with two strategies.
 
 ### Strategies
 
@@ -239,6 +241,12 @@ python -m local.caption_merging input_dir/ -o output_dir/
 
 # Use the threshold strategy with custom max distance
 python -m local.caption_merging input_dir/ -o output_dir/ --strategy threshold --max-distance 80
+
+# Output only figures and tables (no paratext)
+python -m local.caption_merging input_dir/ -o output_dir/ --only figure,table
+
+# Output only paratext
+python -m local.caption_merging input_dir/ -o output_dir/ --only paratext
 ```
 
 ### Evaluation
