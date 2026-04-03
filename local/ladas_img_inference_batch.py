@@ -21,7 +21,7 @@ def _make_ladas_processor(model_file, preload=False):
     from .base_inference import BaseDocumentProcessor
 
     class LADaSDocumentProcessor(BaseDocumentProcessor):
-        def __init__(self, model_name=None, dpi=70, temp_dir=None, preload_model=False):
+        def __init__(self, model_name=None, dpi=72, temp_dir=None, preload_model=False):
             super().__init__(model_name, dpi, temp_dir, preload_model)
 
         def _load_model(self):

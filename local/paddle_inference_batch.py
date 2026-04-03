@@ -128,7 +128,7 @@ class BatchProcessor:
     def __init__(
         self,
         model_name="PP-DocLayout-S",
-        dpi=70,
+        dpi=72,
         temp_dir=None,
         workers=None,
         only=None,
@@ -368,8 +368,8 @@ Examples:
     parser.add_argument(
         "--dpi",
         type=int,
-        default=70,
-        help="DPI for PDF to image conversion (default: 70)",
+        default=72,
+        help="DPI for PDF to image conversion (default: 72)",
     )
 
     parser.add_argument(

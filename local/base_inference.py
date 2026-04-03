@@ -11,7 +11,7 @@ class BaseDocumentProcessor:
     def __init__(
         self,
         model_name: str = None,
-        dpi: int = 70,
+        dpi: int = 72,
         temp_dir: str = None,
         preload_model: bool = False,
     ):
