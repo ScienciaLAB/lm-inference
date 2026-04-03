@@ -44,6 +44,8 @@ image = (
         "python -c 'import dots_ocr; print(\"dots_ocr imported\")'",
         "python -c 'import vllm; print(\"vLLM:\", vllm.__version__)'",
     )
+    .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
+
 )
 
 app = modal.App("dots-ocr-vllm-official-app", image=image)
@@ -252,8 +254,9 @@ async def parse_document_endpoint(request: Request):
 
         start_time = time.perf_counter()
 
-        results_future = shared_service.parse_document.remote(**parse_kwargs)
-        results = results_future.get(output_format)
+        # ✅ ASYNC CALL - enables parallel processing
+        results = await shared_service.parse_document.remote.aio(**parse_kwargs)
+        result_content = results.get(output_format)
 
         duration = time.perf_counter() - start_time
         cost_per_sec = get_cost_per_second("A100_40GB")
@@ -269,7 +272,7 @@ async def parse_document_endpoint(request: Request):
             f"[COST_LOG] File: {original_filename}, Duration: {cost_result['duration_seconds']}s, Cost: ${cost_result['cost_usd']:.6f}"
         )
 
-        return {"result": results, "cost_info": cost_result}
+        return {"result": result_content, "cost_info": cost_result}
 
     except ValueError:
         raise HTTPException(status_code=400, detail="num_threads must be an integer.")
