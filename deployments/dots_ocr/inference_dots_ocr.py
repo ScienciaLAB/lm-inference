@@ -8,7 +8,6 @@ import time
 from fastapi import HTTPException, Request
 
 from lm_inference_utils import get_cost_per_second
-
 # Modal image with necessary dependencies
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
@@ -30,7 +29,7 @@ image = (
         "pydantic",
         "pyyaml",
         "pymupdf",  # Common dependencies
-        "transformers",
+        "transformers<5.0.0",
         extra_options="--no-cache-dir",
     )
     # Clone the dots.ocr repository
@@ -39,14 +38,14 @@ image = (
     )
     .run_commands("cd /dots_ocr_repo && pip install --no-deps -e .")
     # Download model
-    .run_commands("cd /dots_ocr_repo && python tools/download_model.py")
+    .run_commands("cd /dots_ocr_repo && python tools/download_model.py --name rednote-hilab/dots.ocr")
     .run_commands(
         "python -c 'import dots_ocr; print(\"dots_ocr imported\")'",
         "python -c 'import vllm; print(\"vLLM:\", vllm.__version__)'",
     )
     .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
-
 )
+
 
 app = modal.App("dots-ocr-vllm-official-app", image=image)
 
@@ -59,7 +58,7 @@ class DotsOCRService:
     def start_server(self):
         print("Starting vLLM server for dots.ocr...")
 
-        model_path = "/dots_ocr_repo/weights/DotsOCR"
+        model_path = "/dots_ocr_repo/weights/DotsMOCR"  # download_model.py saves here regardless of model name
 
         if not os.path.exists(model_path):
             raise RuntimeError(
@@ -79,6 +78,8 @@ class DotsOCRService:
                 "8000",
                 "--served-model-name",
                 "model",
+                "--chat-template-content-format",
+                "string",
                 "--gpu-memory-utilization",
                 "0.95",
                 "--tensor-parallel-size",
@@ -226,7 +227,7 @@ class DotsOCRService:
 shared_service = DotsOCRService()
 
 
-@app.function(cpu=2, memory=4096, timeout=1000, max_containers=10)
+@app.function(cpu=2, memory=4096, timeout=1000, max_containers=1)
 @modal.concurrent(max_inputs=10)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
@@ -254,9 +255,8 @@ async def parse_document_endpoint(request: Request):
 
         start_time = time.perf_counter()
 
-        # ✅ ASYNC CALL - enables parallel processing
-        results = await shared_service.parse_document.remote.aio(**parse_kwargs)
-        result_content = results.get(output_format)
+        results_future = shared_service.parse_document.remote(**parse_kwargs)
+        results = results_future.get(output_format)
 
         duration = time.perf_counter() - start_time
         cost_per_sec = get_cost_per_second("A100_40GB")
@@ -272,7 +272,7 @@ async def parse_document_endpoint(request: Request):
             f"[COST_LOG] File: {original_filename}, Duration: {cost_result['duration_seconds']}s, Cost: ${cost_result['cost_usd']:.6f}"
         )
 
-        return {"result": result_content, "cost_info": cost_result}
+        return {"result": results, "cost_info": cost_result}
 
     except ValueError:
         raise HTTPException(status_code=400, detail="num_threads must be an integer.")
@@ -281,3 +281,4 @@ async def parse_document_endpoint(request: Request):
         raise HTTPException(
             status_code=500, detail=f"Error processing document: {str(e)}"
         )
+
