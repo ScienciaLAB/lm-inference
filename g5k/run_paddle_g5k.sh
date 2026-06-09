@@ -1,6 +1,7 @@
 #!/bin/bash
 #OAR -n paddle-ocr
 #OAR -q production
+#OAR -p gpu_count>0 AND gpu_compute_capability_major>=5
 #OAR -l host=1,walltime=10:00:00
 #OAR -O paddle.log
 #OAR -E paddle.log
