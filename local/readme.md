@@ -79,7 +79,7 @@ python -m local.paddle_inference <input_pdf> [options]
 | `input` | Input PDF document path (required) | - |
 | `--output`, `-o` | Output directory for processed images and results | `output` |
 | `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
-| `--dpi` | DPI for PDF to image conversion | `70` |
+| `--dpi` | DPI for PDF to image conversion | `72` |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
 | `--only` | Filter output to specific element types | - |
 | `--cleanup-images` | Clean up intermediate files, keep only aggregated JSON | `False` |
@@ -118,7 +118,7 @@ python -m local.paddle_inference_batch <input_dir> [options]
 | `input_dir` | Input directory containing PDF files (required) | - |
 | `--output`, `-o` | Output directory for results | `output` |
 | `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
-| `--dpi` | DPI for PDF to image conversion | `70` |
+| `--dpi` | DPI for PDF to image conversion | `72` |
 | `--workers`, `-w` | Number of parallel workers | CPU count (max 4) |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
 | `--only` | Filter output to specific element types | - |
@@ -180,7 +180,7 @@ python -m local.ladas_inference <input_pdf> --model-file <model_path> [options]
 | `input` | Input PDF document path (required) | - |
 | `--model-file` | Path to YOLO model file (required) | - |
 | `--output`, `-o` | Output directory for results | `output` |
-| `--dpi` | DPI for PDF to image conversion | `70` |
+| `--dpi` | DPI for PDF to image conversion | `72` |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
 | `--only` | Filter output to specific element types | - |
 | `--cleanup-images` | Clean up intermediate files | `False` |
@@ -348,7 +348,7 @@ from local.paddle_inference import PaddleDocumentProcessor, load_transform_eleme
 
 processor = PaddleDocumentProcessor(
     model_name="PP-DocLayout-S",
-    dpi=70,
+    dpi=72,
     preload_model=True
 )
 
@@ -369,7 +369,7 @@ from local.ladas_inference import LADaSDocumentProcessor, load_transform_element
 
 processor = LADaSDocumentProcessor(
     model_name="path/to/model.pt",
-    dpi=70,
+    dpi=72,
     preload_model=True
 )
 
