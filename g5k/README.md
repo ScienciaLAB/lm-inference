@@ -1,92 +1,52 @@
-# Running PaddleOCR `PP-DocLayout-L` on Grid5000 (Nancy)
+# Running `paddle_inference_batch` on Grid5000 (Nancy)
 
-Wrappers to run the existing batch pipeline
-(`python -m local.paddle_inference_batch`) unattended on a Grid5000 GPU node,
-using the **large** layout model `PP-DocLayout-L`.
+OAR batch job that runs the existing pipeline
+`python -m local.paddle_inference_batch` over a folder of PDFs on a Grid5000
+(Nancy) node, using the `PP-DocLayout-L` model by default.
 
-Grid5000 schedules with **OAR** (not SLURM): you reserve a GPU with `oarsub` and
-Nancy exposes GPU nodes through the `production` queue.
+Grid5000 schedules with **OAR** (not SLURM). The environment (the `paddle` conda env
+and poppler) is assumed to be set up already — this script does not provision it.
 
-## Files
+## Submit
 
-| File | Purpose |
-|------|---------|
-| `setup_env_g5k.sh` | One-time: create a venv + install dependencies. |
-| `run_paddle_g5k.sh` | OAR passive batch job (has `#OAR` directives). |
+The script takes positional arguments (all optional, with defaults):
 
-## 1. Connect and get the code
+| Pos | Meaning | Default |
+|-----|---------|---------|
+| `$1` | input PDF dir | `<repo>/pdfs` |
+| `$2` | output dir | `<repo>/output` |
+| `$3` | model name | `PP-DocLayout-L` |
+| `$4` | workers | `8` |
 
-```bash
-ssh access.grid5000.fr        # from your laptop
-ssh nancy                     # hop to the Nancy frontend
-
-git clone <this-repo-url> ~/lm-inference
-cd ~/lm-inference
-mkdir -p pdfs && cp /path/to/your/*.pdf pdfs/   # input PDFs
-```
-
-`~/home` is shared (NFS) across the Nancy frontend and its compute nodes, so the
-venv and data you create here are visible to the job.
-
-## 2. One-time environment setup
+`-S` reads the `#OAR` directives from the script (queue, resources, logs); arguments
+go after the script path, inside the quotes:
 
 ```bash
-bash g5k/setup_env_g5k.sh                 # CPU paddlepaddle wheel (repo default)
-# or, for real GPU acceleration (CUDA wheel):
-GPU_WHEEL=1 bash g5k/setup_env_g5k.sh
-```
-
-Creates a venv at `~/venvs/paddle-g5k` and installs
-`local/requirement.paddle.ladas.txt`.
-
-> **poppler:** `pdf2image` needs the `pdftoppm` binary. The setup script checks for
-> it and, if missing, prints how to get it without root (`module load poppler`,
-> `conda install -c conda-forge poppler`, `guix install poppler`, or a `sudo-g5k`
-> deploy job). Fix that before submitting, or conversion will fail.
-
-## 3. Submit the job
-
-```bash
+# all defaults
 oarsub -S ./g5k/run_paddle_g5k.sh
+
+# explicit args
+oarsub -S "./g5k/run_paddle_g5k.sh ./pdfs ./output PP-DocLayout-L 8"
 ```
 
-The `#OAR` directives inside the script request **1 host / 1 GPU for 2h** on the
-`production` queue and write logs to `paddle.<jobid>.stdout` / `.stderr`. Edit the
-`walltime` / `gpu` line in the script to change resources.
+Resources, queue, and log files are set by the `#OAR` directives at the top of
+`run_paddle_g5k.sh` (`-q production`, `-l host=1,walltime=10:00:00`, logs to
+`paddle.log`). Edit those lines to change walltime or request a GPU
+(`-l host=1/gpu=1,...`).
 
-## 4. Monitor
+## Monitor
 
 ```bash
-oarstat -u                       # your jobs and their state
-tail -f paddle.<jobid>.stdout    # live progress (nvidia-smi + per-file output)
+oarstat -u                  # your jobs and their state
+tail -f paddle.log          # live progress (job context, nvidia-smi, per-file output)
 ```
 
-## 5. Results
+## Results
 
-Output lands in `~/lm-inference/results/`:
+Output lands in the chosen output dir (`<repo>/output` by default):
 - one aggregated `<document>.json` per PDF,
 - per page, `res_N.json` (boxes) and `res_N.jpg` (annotated visualization).
 
-## Equivalent bare command
-
-The job runs, parameterized, exactly:
-
-```bash
-python -m local.paddle_inference_batch ./pdfs -o ./results \
-    --model-name PP-DocLayout-L --workers 4
-```
-
-## Overriding defaults
-
-`oarsub` does **not** forward your shell environment to the job, so the cleanest way
-to change `PDF_DIR`, `OUT_DIR`, `MODEL_NAME`, or `WORKERS` is to edit the defaults at
-the top of `run_paddle_g5k.sh`. For a quick one-off without editing, run an
-interactive job and call the module directly:
-
-```bash
-oarsub -I -q production -l host=1/gpu=1,walltime=0:30:00
-source ~/venvs/paddle-g5k/bin/activate
-cd ~/lm-inference
-python -m local.paddle_inference_batch ./pdfs -o ./results \
-    --model-name PP-DocLayout-M --workers 2
-```
+Already-processed PDFs (where `<name>.json` exists) are skipped automatically; pass
+`--force` by editing the `python -m local.paddle_inference_batch` line if you need to
+reprocess.

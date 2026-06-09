@@ -9,16 +9,52 @@ import argparse
 import time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from multiprocessing import cpu_count, set_start_method
+from multiprocessing import cpu_count, set_start_method, Manager
 import json
 
 # Per-process global, set once by _init_worker
 _worker_processor = None
 
 
-def _init_worker(model_name, dpi, temp_dir):
+def _detect_available_gpus():
+    """
+    Return the list of visible GPU ids on this node.
+
+    Respects CUDA_VISIBLE_DEVICES if set (e.g. by the scheduler); otherwise
+    queries nvidia-smi. Returns an empty list when no GPU is found.
+    """
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if visible is not None and visible.strip():
+        return [d.strip() for d in visible.split(",") if d.strip()]
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def _init_worker(model_name, dpi, temp_dir, gpu_queue=None):
     """Initializer run once per worker process — loads the model."""
     global _worker_processor
+
+    # Pin this worker to a single GPU (one worker per GPU). Must happen BEFORE the
+    # model is built, because PaddlePaddle reads CUDA_VISIBLE_DEVICES at import time
+    # (paddle is imported lazily inside PaddleDocumentProcessor._load_model).
+    if gpu_queue is not None:
+        try:
+            gpu_id = gpu_queue.get_nowait()
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+            print(f"[worker-{os.getpid()}] pinned to GPU {gpu_id}")
+        except Exception:
+            print(f"[worker-{os.getpid()}] no GPU assignment, using default device")
 
     from .paddle_inference import PaddleDocumentProcessor
 
@@ -250,6 +286,23 @@ class BatchProcessor:
                 return True
 
             self.total_files = len(pdf_files)
+
+            # Spread one worker (one model copy) per GPU when more than one is
+            # available, so the models are allocated equally across the GPUs.
+            gpu_ids = _detect_available_gpus()
+            gpu_queue = None
+            manager = None
+            if len(gpu_ids) > 1:
+                self.workers = len(gpu_ids)
+                manager = Manager()
+                gpu_queue = manager.Queue()
+                for gpu_id in gpu_ids:
+                    gpu_queue.put(gpu_id)
+                print(
+                    f"Detected {len(gpu_ids)} GPUs {gpu_ids}: "
+                    f"running 1 worker per GPU ({self.workers} workers)"
+                )
+
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}, DPI: {self.dpi}")
 
@@ -266,7 +319,7 @@ class BatchProcessor:
             with ProcessPoolExecutor(
                 max_workers=self.workers,
                 initializer=_init_worker,
-                initargs=(self.model_name, self.dpi, self.temp_dir),
+                initargs=(self.model_name, self.dpi, self.temp_dir, gpu_queue),
             ) as executor:
                 # Submit all tasks
                 future_to_pdf = {
