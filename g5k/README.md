@@ -61,9 +61,12 @@ They are **positional**, so to set `$4` you must also pass `$1`–`$3`.
 
 ## Behaviour
 
-- **Multi-GPU (automatic):** if the reserved node has more than one GPU, the pipeline
-  ignores `WORKERS` and runs **one worker (one model) per GPU**, allocating the models
-  equally. With a single GPU it caps workers at 4. No flag needed.
+- **One worker per GPU (automatic):** when GPUs are present the pipeline ignores
+  `WORKERS` and runs **one worker (one model) per GPU** — 1 worker for a single GPU,
+  N workers for N GPUs, allocating the models equally. `WORKERS` only applies on
+  CPU-only runs (capped at 4). No flag needed.
+- **Verbose:** the job passes `--verbose`, so `paddle.log` shows each PDF as a worker
+  starts it (in addition to the per-file completion lines).
 - **Resumable:** a PDF is skipped when `<OUT_DIR>/<name>.json` already exists, so
   resubmitting after a walltime kill continues where it left off. To reprocess
   everything, add `--force` to the `python -m local.paddle_inference_batch` line.

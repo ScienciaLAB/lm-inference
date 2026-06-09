@@ -12,8 +12,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count, set_start_method, Manager
 import json
 
-# Per-process global, set once by _init_worker
+# Per-process globals, set once by _init_worker
 _worker_processor = None
+_verbose = False
 
 
 def _detect_available_gpus():
@@ -41,9 +42,10 @@ def _detect_available_gpus():
         return []
 
 
-def _init_worker(model_name, dpi, temp_dir, gpu_queue=None):
+def _init_worker(model_name, dpi, temp_dir, gpu_queue=None, verbose=False):
     """Initializer run once per worker process — loads the model."""
-    global _worker_processor
+    global _worker_processor, _verbose
+    _verbose = verbose
 
     # Pin this worker to a single GPU (one worker per GPU). Must happen BEFORE the
     # model is built, because PaddlePaddle reads CUDA_VISIBLE_DEVICES at import time
@@ -85,7 +87,8 @@ def process_single_pdf_worker(args):
     start_time = time.time()
 
     try:
-        print(f"[{pdf_name}] Processing...")
+        if _verbose:
+            print(f"[{pdf_name}] Processing...")
         result = _worker_processor.process_document(pdf_path, output_dir)
 
         # Apply filtering if requested
@@ -170,6 +173,7 @@ class BatchProcessor:
         only=None,
         cleanup_images=False,
         force=False,
+        verbose=False,
     ):
         """
         Initialize the batch processor.
@@ -181,15 +185,18 @@ class BatchProcessor:
             workers (int): Number of parallel workers (default: CPU count)
             only (str): Filter type - "display", "paratext", or "grobid"
             cleanup_images (bool): Whether to clean up intermediate image files
+            verbose (bool): Print which PDF each worker starts processing
         """
         self.model_name = model_name
         self.dpi = dpi
         self.temp_dir = temp_dir
-        # Limit workers to avoid memory issues
+        # Default worker count; overridden to one-per-GPU in process_documents when
+        # GPUs are present. Capped at 4 to avoid memory issues on CPU-only runs.
         self.workers = min(workers if workers else cpu_count(), 4)
         self.only = only
         self.cleanup_images = cleanup_images
         self.force = force
+        self.verbose = verbose
         self.processed_count = 0
         self.skipped_files = []
         self.total_files = 0
@@ -287,21 +294,26 @@ class BatchProcessor:
 
             self.total_files = len(pdf_files)
 
-            # Spread one worker (one model copy) per GPU when more than one is
-            # available, so the models are allocated equally across the GPUs.
+            # Run one worker (one model copy) per GPU: a single GPU scales down to
+            # 1 worker, multiple GPUs spread one model each so they are used equally.
             gpu_ids = _detect_available_gpus()
+            n_gpus = len(gpu_ids)
             gpu_queue = None
             manager = None
-            if len(gpu_ids) > 1:
-                self.workers = len(gpu_ids)
+            if n_gpus >= 1:
+                self.workers = n_gpus
+            if n_gpus > 1:
+                # Hand each worker a distinct GPU id via a picklable queue.
                 manager = Manager()
                 gpu_queue = manager.Queue()
                 for gpu_id in gpu_ids:
                     gpu_queue.put(gpu_id)
                 print(
-                    f"Detected {len(gpu_ids)} GPUs {gpu_ids}: "
+                    f"Detected {n_gpus} GPUs {gpu_ids}: "
                     f"running 1 worker per GPU ({self.workers} workers)"
                 )
+            elif n_gpus == 1:
+                print(f"Detected 1 GPU {gpu_ids}: running 1 worker")
 
             print(f"Starting batch processing with {self.workers} workers...")
             print(f"Model: {self.model_name}, DPI: {self.dpi}")
@@ -319,7 +331,13 @@ class BatchProcessor:
             with ProcessPoolExecutor(
                 max_workers=self.workers,
                 initializer=_init_worker,
-                initargs=(self.model_name, self.dpi, self.temp_dir, gpu_queue),
+                initargs=(
+                    self.model_name,
+                    self.dpi,
+                    self.temp_dir,
+                    gpu_queue,
+                    self.verbose,
+                ),
             ) as executor:
                 # Submit all tasks
                 future_to_pdf = {
@@ -460,6 +478,14 @@ Examples:
         help="Reprocess all files even if output already exists",
     )
 
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Print which PDF each worker starts processing (in addition to the "
+        "per-file completion lines)",
+    )
+
     args = parser.parse_args()
 
     # Create and run batch processor
@@ -471,6 +497,7 @@ Examples:
         only=args.only,
         cleanup_images=args.cleanup_images,
         force=args.force,
+        verbose=args.verbose,
     )
 
     success = processor.process_documents(args.input_dir, args.output)

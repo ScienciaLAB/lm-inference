@@ -3,8 +3,8 @@
 #OAR -q production
 #OAR -p gpu_count>0 AND gpu_compute_capability_major>=5
 #OAR -l host=1,walltime=10:00:00
-#OAR -O paddle.log
-#OAR -E paddle.log
+#OAR -O paddle.%jobid%.log
+#OAR -E paddle.%jobid%.log
 #
 # ============================================================================
 # Passive OAR batch job: run PaddleOCR layout detection (PP-DocLayout-L by
@@ -38,12 +38,15 @@
 #                     PP-DocLayout-L  large  (most accurate)
 #                     PP-DocLayoutV2 / PP-DocBlockLayout
 #   $4  WORKERS     parallel worker processes     (default: 8)
-#                   NOTE: if the node has >1 GPU, the pipeline overrides this
-#                   and runs exactly one worker (one model) per GPU. With a
-#                   single GPU the pipeline caps workers at 4.
+#                   NOTE: when GPUs are present the pipeline overrides this and
+#                   runs exactly one worker (one model) per GPU — 1 worker for a
+#                   single GPU, N for N GPUs. WORKERS only applies on CPU-only
+#                   runs (capped at 4).
 #
 # BEHAVIOUR:
-#   * Multi-GPU: models are spread one-per-GPU automatically (no flag needed).
+#   * One worker per GPU: 1 GPU -> 1 worker, N GPUs -> N workers, allocated
+#     equally across the GPUs. Automatic, no flag needed.
+#   * Verbose: this job passes --verbose so each PDF being processed is logged.
 #   * Resumable: PDFs whose `<name>.json` already exists in OUT_DIR are skipped,
 #     so resubmitting after a walltime kill continues where it left off. Add
 #     `--force` to the python line below to reprocess everything.
@@ -87,6 +90,7 @@ cd "$REPO_DIR"
 python -m local.paddle_inference_batch "$PDF_DIR" \
     -o "$OUT_DIR" \
     --model-name "$MODEL_NAME" \
-    --workers "$WORKERS"
+    --workers "$WORKERS" \
+    --verbose
 
 echo "==> Finished. Results in $OUT_DIR"
