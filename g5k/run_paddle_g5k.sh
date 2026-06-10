@@ -2,7 +2,7 @@
 #OAR -n paddle-ocr
 #OAR -q production
 #OAR -p gpu_count>0 AND gpu_compute_capability_major>=5
-#OAR -l host=1,walltime=10:00:00
+#OAR -l host=1,walltime=24:00:00
 #OAR -O paddle.%jobid%.log
 #OAR -E paddle.%jobid%.log
 #
@@ -91,6 +91,7 @@ python -m local.paddle_inference_batch "$PDF_DIR" \
     -o "$OUT_DIR" \
     --model-name "$MODEL_NAME" \
     --workers "$WORKERS" \
+    --cleanup-images \
     --verbose
 
 echo "==> Finished. Results in $OUT_DIR"
