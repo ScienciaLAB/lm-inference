@@ -149,8 +149,8 @@ class BatchProcessor:
         self.model_name = model_name
         self.dpi = dpi
         self.temp_dir = temp_dir
-        # Limit workers to avoid memory issues
-        self.workers = min(workers if workers else cpu_count(), 4)
+        # Default to a memory-safe worker count; honor an explicit --workers value
+        self.workers = workers if workers else min(cpu_count(), 4)
         self.only = only
         self.cleanup_images = cleanup_images
         self.force = force
