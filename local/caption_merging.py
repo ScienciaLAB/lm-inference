@@ -247,10 +247,19 @@ def process_single_json(input_path, output_path, merger: CaptionMerger, only=Non
     Args:
         only: set of categories to include ("figure", "table", "paratext").
               None means include all.
+
+    Supports both the new format (dict with "pages" and "elements" keys)
+    and the legacy format (a flat list of elements).
     """
 
     with open(input_path, "r", encoding="utf-8") as f:
-        paddle_data = json.load(f)
+        raw_data = json.load(f)
+
+    # Handle both new dict format and legacy flat list
+    if isinstance(raw_data, dict) and "elements" in raw_data:
+        paddle_data = raw_data["elements"]
+    else:
+        paddle_data = raw_data
 
     figures, tables, paratext_areas = link_captions_and_merge(paddle_data, merger)
 

@@ -59,6 +59,9 @@ class ImageBatchProcessor:
         """
         Process a single image using the provided processor.
         """
+        import json as json_mod
+        from PIL import Image
+
         start_time = time.time()
         base_name = Path(img_path).stem
 
@@ -73,6 +76,10 @@ class ImageBatchProcessor:
 
             result = preds[0]
 
+            # Read image dimensions
+            with Image.open(img_path) as img:
+                page_width, page_height = img.size
+
             # Create a folder for this image
             img_output_dir = os.path.join(output_dir, base_name)
             os.makedirs(img_output_dir, exist_ok=True)
@@ -82,10 +89,25 @@ class ImageBatchProcessor:
                 save_path=os.path.join(img_output_dir, f"{base_name}.jpg")
             )
 
-            # Save JSON (Coordinates) inside image folder
-            result.save_to_json(
-                save_path=os.path.join(img_output_dir, f"{base_name}.json")
-            )
+            # Save JSON (Coordinates) with page size inside image folder
+            json_path = os.path.join(img_output_dir, f"{base_name}.json")
+            result.save_to_json(save_path=json_path)
+
+            # Re-read the saved JSON and wrap it with page size info
+            with open(json_path, "r", encoding="utf-8") as f:
+                raw_data = json_mod.load(f)
+
+            output_data = {
+                "dpi": processor.dpi,
+                "pages": [{
+                    "page_height": float(page_height),
+                    "page_width": float(page_width),
+                }],
+                **raw_data,
+            }
+
+            with open(json_path, "w", encoding="utf-8") as f:
+                json_mod.dump(output_data, f, indent=2, ensure_ascii=False)
 
             processing_time = time.time() - start_time
             return img_path, True, None, processing_time

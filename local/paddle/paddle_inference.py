@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .base_inference import BaseDocumentProcessor
+from ..base_inference import BaseDocumentProcessor
 from lm_inference_utils import filter_and_aggregate
 
 
@@ -119,18 +119,42 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
 
 def load_transform_elements(
     document_output_dir: str,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
+    from PIL import Image
+
     document_output_path = Path(document_output_dir)
 
     json_files = list(document_output_path.glob("res_*.json"))
     if not json_files:
         print(f"No JSON files found in {document_output_dir} for processing")
-        return []
+        return {"pages": [], "elements": []}
 
+    pages = []
     standard_elements = []
 
     for json_file in sorted(json_files):
-        page_number = int(json_file.stem.split("_")[1]) + 1
+        page_index = int(json_file.stem.split("_")[1])
+        page_number = page_index + 1
+
+        # Read page dimensions from the corresponding image
+        image_file = document_output_path / f"page_{page_number:04d}.jpg"
+        if image_file.exists():
+            with Image.open(image_file) as img:
+                page_width, page_height = img.size
+        else:
+            # Fallback: try the annotated result image
+            fallback_image = document_output_path / f"res_{page_index}.jpg"
+            if fallback_image.exists():
+                with Image.open(fallback_image) as img:
+                    page_width, page_height = img.size
+            else:
+                page_width, page_height = 0, 0
+
+        pages.append({
+            "page_height": float(page_height),
+            "page_width": float(page_width),
+        })
+
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
@@ -142,7 +166,6 @@ def load_transform_elements(
             width = int(x2 - x1)
             height = int(y2 - y1)
 
-            # Create standard format element
             standard_element = {
                 "page": page_number,
                 "x": x,
@@ -154,7 +177,7 @@ def load_transform_elements(
 
             standard_elements.append(standard_element)
 
-    return standard_elements
+    return {"pages": pages, "elements": standard_elements}
 
 
 if __name__ == "__main__":
@@ -221,7 +244,9 @@ if __name__ == "__main__":
     if not result.get("success", False):
         print(f"Processing failed: {result.get('error', 'Unknown error')}")
 
-    bounding_boxes = load_transform_elements(result["output_dir"])
+    bounding_box_data = load_transform_elements(result["output_dir"])
+    pages = bounding_box_data["pages"]
+    bounding_boxes = bounding_box_data["elements"]
 
     if args.only:
         figure_type_aggregation = {
@@ -252,8 +277,9 @@ if __name__ == "__main__":
     output_file = Path(args.input).stem + ".json"
     output_file_path = Path(result["main_output_dir"]) / output_file
 
+    output_data = {"dpi": args.dpi, "pages": pages, "elements": bounding_boxes}
     with open(output_file_path, "w", encoding="utf-8") as f:
-        json.dump(bounding_boxes, f, indent=2, ensure_ascii=False)
+        json.dump(output_data, f, indent=2, ensure_ascii=False)
 
     print(f"Results saved to: {output_file_path}")
 
