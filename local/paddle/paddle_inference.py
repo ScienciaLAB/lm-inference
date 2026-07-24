@@ -4,16 +4,14 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List
 
-from ultralytics import YOLO
-
-from .base_inference import BaseDocumentProcessor
+from ..base_inference import BaseDocumentProcessor
 from lm_inference_utils import filter_and_aggregate
 
 
-class LADaSDocumentProcessor(BaseDocumentProcessor):
+class PaddleDocumentProcessor(BaseDocumentProcessor):
     def __init__(
         self,
-        model_name: str = None,
+        model_name: str = "PP-DocLayout-S",
         dpi: int = 72,
         temp_dir: str = None,
         preload_model: bool = False,
@@ -22,12 +20,28 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
 
     def _load_model(self) -> None:
         if self.model is None:
+            from paddleocr import LayoutDetection
+
             print("Loading model...")
             start_time = time.time()
-
-            self.model = YOLO(Path(self.model_name), verbose=True)
+            self.model = LayoutDetection(model_name=self.model_name)
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f} seconds")
+
+    def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
+        from pdf2image import convert_from_path
+
+        print(f"Converting PDF to images: {pdf_path}")
+        images = convert_from_path(pdf_path, dpi=self.dpi, thread_count=os.cpu_count())
+        image_paths = []
+
+        for i, image in enumerate(images, 1):
+            image_path = output_dir / f"page_{i:04d}.jpg"
+            image.save(image_path, "JPEG")
+            image_paths.append(image_path)
+
+        print(f"Converted {len(images)} pages to images")
+        return image_paths
 
     def process(self, pdf_path: str, output_dir: Path) -> List[Dict]:
         self._load_model()
@@ -36,7 +50,9 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
         image_path_strings = [str(path) for path in image_paths]
 
         start_time = time.time()
-        output = self.model.predict(image_path_strings, batch=os.cpu_count())
+        output = self.model.predict(
+            image_path_strings, batch_size=os.cpu_count(), layout_nms=True
+        )
         inference_time = time.time() - start_time
         print(f"Process completed in {inference_time:.2f} seconds")
 
@@ -45,10 +61,8 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
             res.page_index = i + 1
             base_name = f"res_{i}"
 
-            with open(output_dir / f"{base_name}.json", "w", encoding="utf-8") as f:
-                f.write(res.to_json())
-
-            res.save(output_dir / f"{base_name}.jpg")
+            res.save_to_img(save_path=str(output_dir / f"{base_name}.jpg"))
+            res.save_to_json(save_path=str(output_dir / f"{base_name}.json"))
 
         return output
 
@@ -105,49 +119,72 @@ class LADaSDocumentProcessor(BaseDocumentProcessor):
 
 def load_transform_elements(
     document_output_dir: str,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, Any]:
+    from PIL import Image
+
     document_output_path = Path(document_output_dir)
 
     json_files = list(document_output_path.glob("res_*.json"))
     if not json_files:
         print(f"No JSON files found in {document_output_dir} for processing")
-        return []
+        return {"pages": [], "elements": []}
 
+    pages = []
     standard_elements = []
 
     for json_file in sorted(json_files):
-        page_number = int(json_file.stem.split("_")[1]) + 1
+        page_index = int(json_file.stem.split("_")[1])
+        page_number = page_index + 1
+
+        # Read page dimensions from the corresponding image
+        image_file = document_output_path / f"page_{page_number:04d}.jpg"
+        if image_file.exists():
+            with Image.open(image_file) as img:
+                page_width, page_height = img.size
+        else:
+            # Fallback: try the annotated result image
+            fallback_image = document_output_path / f"res_{page_index}.jpg"
+            if fallback_image.exists():
+                with Image.open(fallback_image) as img:
+                    page_width, page_height = img.size
+            else:
+                page_width, page_height = 0, 0
+
+        pages.append({
+            "page_height": float(page_height),
+            "page_width": float(page_width),
+        })
+
         with open(json_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        for element in data:
-            x1, y1, x2, y2 = element["box"].values()
+        for element in data["boxes"]:
+            coords = element.get("coordinate")
+            x1, y1, x2, y2 = coords
             x = int(x1)
             y = int(y1)
             width = int(x2 - x1)
             height = int(y2 - y1)
 
-            # Create standard format element
             standard_element = {
                 "page": page_number,
                 "x": x,
                 "y": y,
                 "width": width,
                 "height": height,
-                "type": element.get("name"),
-                "confidence": element.get("confidence"),
+                "type": element.get("label"),
             }
 
             standard_elements.append(standard_element)
 
-    return standard_elements
+    return {"pages": pages, "elements": standard_elements}
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Process PDF documents with LADaS layout detection"
+        description="Process PDF documents with PaddleOCR layout detection"
     )
     parser.add_argument("input", help="Input PDF document path")
     parser.add_argument(
@@ -156,7 +193,18 @@ if __name__ == "__main__":
         default="output",
         help="Output directory for processed images and results",
     )
-    parser.add_argument("--model-file", required=True, help="Model file for layout")
+    parser.add_argument(
+        "--model-name",
+        choices=[
+            "PP-DocLayout-L",
+            "PP-DocLayout-M",
+            "PP-DocLayout-S",
+            "PP-DocLayoutV2",
+            "PP-DocBlockLayout",
+        ],
+        default="PP-DocLayout-S",
+        help="Model name for layout detection (default: PP-DocLayout-S)",
+    )
     parser.add_argument(
         "--dpi",
         type=int,
@@ -184,8 +232,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    processor = LADaSDocumentProcessor(
-        model_name=args.model_file,
+    processor = PaddleDocumentProcessor(
+        model_name=args.model_name,
         dpi=args.dpi,
         temp_dir=args.temp_dir,
         preload_model=True,
@@ -196,7 +244,9 @@ if __name__ == "__main__":
     if not result.get("success", False):
         print(f"Processing failed: {result.get('error', 'Unknown error')}")
 
-    bounding_boxes = load_transform_elements(result["output_dir"])
+    bounding_box_data = load_transform_elements(result["output_dir"])
+    pages = bounding_box_data["pages"]
+    bounding_boxes = bounding_box_data["elements"]
 
     if args.only:
         figure_type_aggregation = {
@@ -227,8 +277,9 @@ if __name__ == "__main__":
     output_file = Path(args.input).stem + ".json"
     output_file_path = Path(result["main_output_dir"]) / output_file
 
+    output_data = {"dpi": args.dpi, "pages": pages, "elements": bounding_boxes}
     with open(output_file_path, "w", encoding="utf-8") as f:
-        json.dump(bounding_boxes, f, indent=2, ensure_ascii=False)
+        json.dump(output_data, f, indent=2, ensure_ascii=False)
 
     print(f"Results saved to: {output_file_path}")
 

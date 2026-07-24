@@ -54,7 +54,9 @@ def process_single_pdf_worker(args):
 
         # Apply filtering if requested
         if result.get("success", False):
-            bounding_boxes = load_transform_elements(result["output_dir"])
+            bounding_box_data = load_transform_elements(result["output_dir"])
+            pages = bounding_box_data["pages"]
+            bounding_boxes = bounding_box_data["elements"]
 
             if only:
                 figure_type_aggregation = {
@@ -92,11 +94,12 @@ def process_single_pdf_worker(args):
                     )
 
             # Save the final aggregated JSON named after the PDF
+            output_data = {"dpi": _worker_processor.dpi, "pages": pages, "elements": bounding_boxes}
             final_json_path = os.path.join(
                 result["main_output_dir"], f"{pdf_name}.json"
             )
             with open(final_json_path, "w", encoding="utf-8") as f:
-                json.dump(bounding_boxes, f, indent=4, ensure_ascii=False)
+                json.dump(output_data, f, indent=4, ensure_ascii=False)
 
         # Apply cleanup if requested
         if result.get("success", False) and cleanup_images:

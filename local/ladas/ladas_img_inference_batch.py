@@ -18,7 +18,7 @@ def _make_ladas_processor(model_file, preload=False):
     """Lazily import and create a LADaSDocumentProcessor."""
     from ultralytics import YOLO
 
-    from .base_inference import BaseDocumentProcessor
+    from ..base_inference import BaseDocumentProcessor
 
     class LADaSDocumentProcessor(BaseDocumentProcessor):
         def __init__(self, model_name=None, dpi=72, temp_dir=None, preload_model=False):
@@ -74,6 +74,8 @@ class LADaSBatchRunner:
         """
         Process a single image using the assigned processor.
         """
+        import json
+
         start_time = time.time()
         base_name = Path(img_path).stem
 
@@ -85,8 +87,24 @@ class LADaSBatchRunner:
             results = processor.model.predict(img_path, verbose=False, stream=False)
             save_path = os.path.join(output_dir, f"{base_name}.json")
             for res in results:
+                # Extract page dimensions from the YOLO result
+                # orig_shape is (height, width) of the original image
+                img_h, img_w = res.orig_shape
+
+                raw_elements = json.loads(res.to_json())
+
+                output_data = {
+                    "dpi": processor.dpi,
+                    "pages": [{
+                        "page_height": float(img_h),
+                        "page_width": float(img_w),
+                    }],
+                    "elements": raw_elements,
+                }
+
                 with open(save_path, "w", encoding="utf-8") as f:
-                    f.write(res.to_json())
+                    json.dump(output_data, f, indent=2, ensure_ascii=False)
+
             processing_time = time.time() - start_time
             return img_path, True, None, processing_time
 
