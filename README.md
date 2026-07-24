@@ -78,6 +78,7 @@ pip install -r deployments/requirements.txt
 | Docling | `modal deploy deployments/docling/docling_server_inference.py` |
 | Docling Serve (Granite) | `uv run modal deploy deployments/docling-serve-granite/docling_server_inference.py` |
 | DoTS.OCR | `modal deploy deployments/dots_ocr/inference_dots_ocr.py` |
+| MinerU 2.5 | `modal deploy deployments/minerU/inference_minerU.py` |
 | OlmOCR | `modal deploy deployments/olmo_ocr/inference_olmOCR.py` |
 | Qwen 2.5 VL 7B | `modal deploy deployments/qwen/qwen25_VL_7B_sglang.py` |
 | Qwen 3 VL 2B | `modal deploy deployments/qwen/qwen3_VL_2B_sglang.py` |
@@ -89,5 +90,6 @@ Each deployment folder contains a `README.md` with example `curl` commands for i
 - [Docling](./deployments/docling/README.md)
 - [Docling Serve (Granite)](./deployments/docling-serve-granite/README.md)
 - [DoTS.OCR](./deployments/dots_ocr/readme.md)
+- [MinerU 2.5](./deployments/minerU/readme.md)
 - [OlmOCR](./deployments/olmo_ocr/readme.md)
 - [Qwen](./deployments/qwen/readme.md)
