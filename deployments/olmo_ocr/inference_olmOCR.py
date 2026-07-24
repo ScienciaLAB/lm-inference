@@ -32,7 +32,6 @@ image = (
         extra_index_url="https://download.pytorch.org/whl/cu128",
     )
     .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
-
 )
 
 

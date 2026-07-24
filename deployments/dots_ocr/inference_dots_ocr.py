@@ -8,6 +8,7 @@ import time
 from fastapi import HTTPException, Request
 
 from lm_inference_utils import get_cost_per_second
+
 # Modal image with necessary dependencies
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
@@ -38,7 +39,9 @@ image = (
     )
     .run_commands("cd /dots_ocr_repo && pip install --no-deps -e .")
     # Download model
-    .run_commands("cd /dots_ocr_repo && python tools/download_model.py --name rednote-hilab/dots.ocr")
+    .run_commands(
+        "cd /dots_ocr_repo && python tools/download_model.py --name rednote-hilab/dots.ocr"
+    )
     .run_commands(
         "python -c 'import dots_ocr; print(\"dots_ocr imported\")'",
         "python -c 'import vllm; print(\"vLLM:\", vllm.__version__)'",
@@ -281,4 +284,3 @@ async def parse_document_endpoint(request: Request):
         raise HTTPException(
             status_code=500, detail=f"Error processing document: {str(e)}"
         )
-

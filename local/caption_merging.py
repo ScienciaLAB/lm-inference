@@ -311,7 +311,9 @@ def main():
         only = {s.strip() for s in args.only.split(",")}
         unknown = only - valid
         if unknown:
-            parser.error(f"Unknown categories: {', '.join(unknown)}. Valid: {', '.join(sorted(valid))}")
+            parser.error(
+                f"Unknown categories: {', '.join(unknown)}. Valid: {', '.join(sorted(valid))}"
+            )
 
     # Create the merger based on strategy choice
     if args.strategy == "threshold":
@@ -347,7 +349,9 @@ def main():
         output_file = Path(args.output) / json_file.name
 
         try:
-            n_fig, n_tab, n_para = process_single_json(json_file, output_file, merger, only=only)
+            n_fig, n_tab, n_para = process_single_json(
+                json_file, output_file, merger, only=only
+            )
             total_figures += n_fig
             total_tables += n_tab
             total_paratext += n_para

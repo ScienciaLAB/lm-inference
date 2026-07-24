@@ -52,7 +52,6 @@ image = (
         }
     )
     .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
-
 )
 
 MODEL_PATH = "Qwen/Qwen2.5-VL-7B-Instruct"

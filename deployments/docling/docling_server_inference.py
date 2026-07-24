@@ -6,11 +6,11 @@ from lm_inference_utils import get_cost_per_second
 
 app = modal.App("docling-serve-modal")
 
-image = modal.Image.from_registry(
-    "quay.io/docling-project/docling-serve-cu128:v1.7.0"
-).run_commands("docling-tools models download --all").add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
-
-
+image = (
+    modal.Image.from_registry("quay.io/docling-project/docling-serve-cu128:v1.7.0")
+    .run_commands("docling-tools models download --all")
+    .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
+)
 
 
 @app.function(
