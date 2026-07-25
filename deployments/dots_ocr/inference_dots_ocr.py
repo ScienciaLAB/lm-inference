@@ -55,7 +55,10 @@ app = modal.App("dots-ocr-vllm-official-app", image=image)
 
 # Modal class to manage the vLLM server lifecycle
 @app.cls(gpu="A100-40GB", scaledown_window=300, max_containers=4, min_containers=1)
-@modal.concurrent(max_inputs=4)
+# One doc per container so N concurrent (async-dispatched) requests fan out to N
+# GPUs instead of packing onto one; pre-warm with min_containers=max_containers
+# to avoid the cold-start ramp on a batch.
+@modal.concurrent(max_inputs=1)
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
@@ -258,8 +261,10 @@ async def parse_document_endpoint(request: Request):
 
         start_time = time.perf_counter()
 
-        results_future = shared_service.parse_document.remote(**parse_kwargs)
-        results = results_future.get(output_format)
+        # Async dispatch so concurrent requests aren't serialized on the event
+        # loop; with the service at max_inputs=1 this lets them fan out per GPU.
+        outputs = await shared_service.parse_document.remote.aio(**parse_kwargs)
+        results = outputs.get(output_format)
 
         duration = time.perf_counter() - start_time
         cost_per_sec = get_cost_per_second("A100_40GB")

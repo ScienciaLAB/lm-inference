@@ -47,7 +47,9 @@ app = modal.App("olmocr-v2-inference")
     min_containers=1,
     max_containers=4,
 )
-@modal.concurrent(max_inputs=4)
+# One doc per container so async-dispatched concurrent requests (the endpoint
+# already uses remote.aio) fan out to N GPUs instead of packing onto one.
+@modal.concurrent(max_inputs=1)
 class OlmOcrService:
     @modal.enter()
     def start_vllm(self):
