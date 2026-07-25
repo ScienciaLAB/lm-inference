@@ -1,0 +1,31 @@
+services:
+  mineru:
+    build:
+      context: .
+      args:
+        # Pin a vLLM image tag that supports your Blackwell GPU (CUDA 12.8+).
+        # MinerU's reference Blackwell stack is vllm 0.11.2 + torch 2.9.
+        VLLM_TAG: v0.11.2
+    image: mineru-vllm-local
+    ports:
+      - "8000:8000"          # MinerU HTTP API
+    environment:
+      MINERU_VLM_MODEL: opendatalab/MinerU2.5-2509-1.2B
+      GPU_MEM_UTIL: "0.90"
+      TP_SIZE: "1"           # tensor-parallel size = number of GPUs to shard across
+      # HF_TOKEN: ${HF_TOKEN}   # only needed for gated model repos
+    volumes:
+      - hf-cache:/root/.cache/huggingface   # persist the ~2.4GB weights between runs
+    shm_size: "16gb"          # vLLM needs a large /dev/shm
+    ipc: host
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all      # or `count: 1`; set TP_SIZE to match
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
