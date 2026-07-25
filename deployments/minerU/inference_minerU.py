@@ -66,11 +66,11 @@ app = modal.App("mineru-vllm-official-app", image=image)
     min_containers=1,
     volumes={HF_CACHE_PATH: HF_CACHE},
 )
-# One document per container: N concurrent client requests then fan out to N
-# separate GPU containers (up to max_containers) instead of piling onto one.
-# With max_inputs>1 a single container absorbs all the concurrency, so the pool
-# never scales and requests contend/get cancelled ("Missing request").
-@modal.concurrent(max_inputs=1)
+# One warm container batches up to 4 concurrent docs (vLLM batches internally).
+# NOTE: to truly fan out across GPUs you must ALSO make the web endpoint dispatch
+# concurrently (await parse_document.remote.aio(...)); with the blocking .remote()
+# below, max_inputs=1 just serializes to one doc at a time, so we keep 4 here.
+@modal.concurrent(max_inputs=4)
 class MinerUService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
