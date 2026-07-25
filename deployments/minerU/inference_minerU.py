@@ -45,7 +45,7 @@ image = (
     # longer crashes. (vLLM version is unrelated — 0.10.1.1 and 0.21 both hit this.)
     .run_commands(
         "P=$(python -c 'import os,prometheus_fastapi_instrumentator as m;print(os.path.join(os.path.dirname(m.__file__),\"routing.py\"))') && "
-        "sed -i 's/route_name = route\\.path/route_name = getattr(route, \"path\", \"\")/' \"$P\" && "
+        'sed -i \'s/route_name = route\\.path/route_name = getattr(route, "path", "")/\' "$P" && '
         "grep -n 'getattr(route' \"$P\""
     )
     .run_commands(
