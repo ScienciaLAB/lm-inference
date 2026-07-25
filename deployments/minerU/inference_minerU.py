@@ -66,11 +66,11 @@ app = modal.App("mineru-vllm-official-app", image=image)
     min_containers=1,
     volumes={HF_CACHE_PATH: HF_CACHE},
 )
-# The endpoint now dispatches asynchronously (parse_document.remote.aio), so
-# concurrent requests are not serialized on the event loop. max_inputs here caps
-# how many docs one container batches (vLLM batches internally); set to 1 with a
-# pre-warmed min==max pool to fan out one doc per GPU.
-@modal.concurrent(max_inputs=4)
+# The endpoint dispatches asynchronously (parse_document.remote.aio), so
+# concurrent requests are not serialized on the event loop. With max_inputs=1
+# each container handles one doc, so N concurrent async dispatches require N
+# containers -> the pool fans out one doc per GPU (up to max_containers).
+@modal.concurrent(max_inputs=1)
 class MinerUService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
