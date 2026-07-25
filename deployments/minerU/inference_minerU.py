@@ -66,7 +66,11 @@ app = modal.App("mineru-vllm-official-app", image=image)
     min_containers=1,
     volumes={HF_CACHE_PATH: HF_CACHE},
 )
-@modal.concurrent(max_inputs=4)
+# One document per container: N concurrent client requests then fan out to N
+# separate GPU containers (up to max_containers) instead of piling onto one.
+# With max_inputs>1 a single container absorbs all the concurrency, so the pool
+# never scales and requests contend/get cancelled ("Missing request").
+@modal.concurrent(max_inputs=1)
 class MinerUService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
