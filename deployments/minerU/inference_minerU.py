@@ -66,10 +66,10 @@ app = modal.App("mineru-vllm-official-app", image=image)
     min_containers=1,
     volumes={HF_CACHE_PATH: HF_CACHE},
 )
-# One warm container batches up to 4 concurrent docs (vLLM batches internally).
-# NOTE: to truly fan out across GPUs you must ALSO make the web endpoint dispatch
-# concurrently (await parse_document.remote.aio(...)); with the blocking .remote()
-# below, max_inputs=1 just serializes to one doc at a time, so we keep 4 here.
+# The endpoint now dispatches asynchronously (parse_document.remote.aio), so
+# concurrent requests are not serialized on the event loop. max_inputs here caps
+# how many docs one container batches (vLLM batches internally); set to 1 with a
+# pre-warmed min==max pool to fan out one doc per GPU.
 @modal.concurrent(max_inputs=4)
 class MinerUService:
     @modal.enter()  # Runs once when the container starts
@@ -244,8 +244,10 @@ async def parse_document_endpoint(request: Request):
 
         start_time = time.perf_counter()
 
-        results_future = shared_service.parse_document.remote(**parse_kwargs)
-        results = results_future.get(output_format)
+        # Async dispatch (like olmOCR): the blocking .remote() ties up the event
+        # loop, serializing concurrent requests on the single endpoint container.
+        outputs = await shared_service.parse_document.remote.aio(**parse_kwargs)
+        results = outputs.get(output_format)
 
         duration = time.perf_counter() - start_time
         cost_per_sec = get_cost_per_second("A100_40GB")
