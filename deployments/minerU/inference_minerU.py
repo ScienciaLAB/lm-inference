@@ -75,9 +75,14 @@ class MinerUService:
 
         # mineru-vllm-server wraps `vllm serve` with the MinerU2.5 defaults and
         # accepts vLLM passthrough flags. It exposes an OpenAI-compatible API.
+        # `--model` pins the VLM to MinerU2.5-2509 (Sept 2025); without it the
+        # server defaults to the newer MinerU2.5-Pro-2605 (2026), which would
+        # break temporal parity with our Sept-2025 Docling comparison.
         self.server_process = subprocess.Popen(
             [
                 "mineru-vllm-server",
+                "--model",
+                MODEL_NAME,
                 "--host",
                 "0.0.0.0",
                 "--port",
