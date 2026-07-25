@@ -38,6 +38,16 @@ image = (
             "HF_HOME": HF_CACHE_PATH,
         }
     )
+    # Patch a prometheus_fastapi_instrumentator bug that makes MinerU's vLLM
+    # OpenAI server 500 on EVERY request (incl. /health and inference): its
+    # route-name lookup does `route.path` on routes that lack it (`_IncludedRouter`),
+    # raising AttributeError. Guard the attribute access so the middleware no
+    # longer crashes. (vLLM version is unrelated — 0.10.1.1 and 0.21 both hit this.)
+    .run_commands(
+        "P=$(python -c 'import os,prometheus_fastapi_instrumentator as m;print(os.path.join(os.path.dirname(m.__file__),\"routing.py\"))') && "
+        "sed -i 's/route_name = route\\.path/route_name = getattr(route, \"path\", \"\")/' \"$P\" && "
+        "grep -n 'getattr(route' \"$P\""
+    )
     .run_commands(
         "mineru --help",
         "python -c 'import vllm; print(\"vLLM:\", vllm.__version__)'",
