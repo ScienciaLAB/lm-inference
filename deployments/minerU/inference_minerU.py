@@ -22,9 +22,13 @@ HF_CACHE_PATH = "/root/.cache/huggingface"
 image = (
     modal.Image.from_registry("nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11")
     .apt_install("git", "wget", "libgl1", "libglib2.0-0")
-    # mineru[core,vllm] pulls a compatible torch/vllm; MinerU pins vllm>=0.10.1.1,<0.22.0.
+    # Pin vLLM to MinerU's recommended 0.10.1.1. The auto-resolved 0.21.x breaks
+    # the OpenAI server: prometheus_fastapi_instrumentator crashes on every route
+    # ("'_IncludedRouter' object has no attribute 'path'"), so /health and the
+    # inference endpoints all return 500 and the container never becomes ready.
     .pip_install(
         "mineru[core,vllm]",
+        "vllm==0.10.1.1",
         extra_options="--no-cache-dir",
     )
     .env(
