@@ -33,6 +33,7 @@ logger = logging.getLogger("paddle_server")
 _processor = None
 _model_ready = False
 _server_config: Dict[str, Any] = {}
+_inference_lock = asyncio.Lock()
 
 #  Pydantic models
 class FilterMode(str, Enum):
@@ -226,9 +227,11 @@ async def process_pdf(
         logger.info("Received '%s' (%d bytes)", file.filename, len(content))
 
         # Run inference in a thread to avoid blocking the event loop
-        result, elements = await asyncio.to_thread(
-            _run_inference, str(pdf_path), str(tmp_dir), filter, merge_captions
-        )
+        # We use a lock because the PaddlePaddle model instance is NOT thread-safe
+        async with _inference_lock:
+            result, elements = await asyncio.to_thread(
+                _run_inference, str(pdf_path), str(tmp_dir), filter, merge_captions
+            )
 
         if not result.get("success", False):
             raise HTTPException(
