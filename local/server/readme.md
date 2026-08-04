@@ -21,8 +21,10 @@ python -m local.server.paddle_server
 python -m local.server.paddle_server --model-name PP-DocLayout-L --port 8000
 
 # Multiple workers (requires enough memory for multiple model copies)
-python -m local.server.paddle_server --workers 2 --port 8080
+python -m local.server.paddle_server --workers 4 --port 8080
 ```
+
+> **Worker Recommendation:** For optimal throughput, we recommend setting the number of server workers (`--workers`) to match the number of client threads (`--n` in grobid-client) 
 
 ## API Endpoints
 
