@@ -14,6 +14,10 @@ import os
 import shutil
 import tempfile
 import time
+try:
+    import psutil
+except ImportError:
+    psutil = None
 from contextlib import asynccontextmanager
 from enum import Enum
 from pathlib import Path
@@ -62,6 +66,9 @@ class ProcessResponse(BaseModel):
     num_pages: int
     num_elements: int
     processing_time_seconds: float
+    throughput_pages_per_second: Optional[float] = None
+    system_ram_mb: Optional[float] = None
+    system_cpu_percent: Optional[float] = None
     elements: List[Dict[str, Any]]
 
 
@@ -239,11 +246,27 @@ async def process_pdf(
                 detail=f"Processing failed: {result.get('error', 'Unknown error')}",
             )
 
+        # Get RAM and CPU usage
+        sys_ram = None
+        sys_cpu = None
+        if psutil:
+            process = psutil.Process()
+            sys_ram = round(process.memory_info().rss / (1024 * 1024), 2)
+            sys_cpu = psutil.cpu_percent()
+
+        # Calculate throughput
+        num_pages = result.get("num_pages", 0)
+        proc_time = round(result.get("processing_time", 0), 3)
+        throughput = round(num_pages / proc_time, 2) if proc_time > 0 else 0.0
+
         return ProcessResponse(
             filename=file.filename,
-            num_pages=result.get("num_pages", 0),
+            num_pages=num_pages,
             num_elements=len(elements),
-            processing_time_seconds=round(result.get("processing_time", 0), 3),
+            processing_time_seconds=proc_time,
+            throughput_pages_per_second=throughput,
+            system_ram_mb=sys_ram,
+            system_cpu_percent=sys_cpu,
             elements=elements,
         )
 
