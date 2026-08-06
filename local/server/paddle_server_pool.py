@@ -345,7 +345,7 @@ def _run_inference(
             for item in tables:
                 merged_elements.append(_to_output_item(item, "table"))
             for item in paratext_areas:
-                merged_elements.append(_to_output_item(item, "paratext"))
+                merged_elements.append(_to_output_item(item, "ignore"))
 
             merged_elements.sort(key=lambda x: (x["page"], x["y"]))
             elements = merged_elements
