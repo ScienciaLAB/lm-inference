@@ -85,7 +85,7 @@ time find pdfs -name "*.pdf" | xargs -P 4 -I {} curl -s -X POST http://localhost
 ```
 *(Adjust `-P 4` to match the number of workers you are testing)*
 
-### 3. Results (Dataset: 100 PDFs, 1003 Pages)
+### 3. Results (Dataset: 100 PDFs, 1003 Pages, ~10.03 avg pages/doc)
 
 | Workers | Total Real-World Time | Average Throughput | Total Peak RAM (All Workers) | Total Peak CPU (All Workers) |
 |---------|-----------------------|--------------------|------------------------------|------------------------------|
@@ -122,7 +122,7 @@ time find pdfs -name "*.pdf" | xargs -P <TOTAL_MODELS> -I {} sh -c 'curl -s -X P
 ```
 *(Set `-P` to `workers × models-per-worker` to fully saturate the server)*
 
-### 3. Results (Dataset: 100 PDFs, 1003 Pages)
+### 3. Results (Dataset: 100 PDFs, 1003 Pages, ~10.03 avg pages/doc)
 
 | Workers | Models | Total Models | Total Real-World Time | Average Throughput | Total Peak RAM | Total Peak CPU |
 |---------|---------------|--------------|----------------------|--------------------|-|-|
@@ -132,3 +132,50 @@ time find pdfs -name "*.pdf" | xargs -P <TOTAL_MODELS> -I {} sh -c 'curl -s -X P
 | **4** | **2** | 8 | 433.07s (7:13.07) | 2.32 pages/sec | ~7.9 GB | ~394% |
 
 Throughput is calculated by dividing 1003 total pages by the Total Real-World Time. Total RAM and CPU are calculated by taking the absolute maximum recorded in the output JSON files and multiplying by the total number of models.
+
+---
+
+## GROBID Evaluation (With and Without PaddlePaddle)
+
+This experiment evaluates the end-to-end processing time of using the `grobid-client-python` library with and without the local PaddlePaddle server for layout detection (typed areas).
+
+### Configurations Used
+Due to rate limits on the free Hugging Face Space tier, the GROBID client concurrency is capped at 4 threads:
+
+- **GROBID Client**: `--n 4`. We use 4 concurrent threads.
+- **PaddlePaddle Server**: `--workers 4`. We use the standard server architecture with 4 workers (the fastest 4-model setup from Experiment 1) to provide exactly 4 models in memory, perfectly matching the 4 concurrent requests coming from the GROBID client.
+
+### 1. GROBID Baseline (No PaddlePaddle)
+```shell
+time grobid_client processFulltextDocument \
+  --input ./test_pdfs \
+  --output ./test_output_baseline \
+  --server https://*************.hf.space \
+  --n 4 \
+  --verbose
+```
+
+### 2. Benchmark B: GROBID + PaddlePaddle
+**Terminal 1 (Server):**
+```shell
+python -m local.server.paddle_server --workers 4 --port 8080
+```
+**Terminal 2 (Client):**
+```shell
+time grobid_client processFulltextDocument \
+  --input ./test_pdfs \
+  --output ./test_output_typed \
+  --server https://**********-grobidcrf.hf.space \
+  --typed_area \
+  --typed_area_server http://localhost:8080 \
+  --n 4 \
+  --verbose
+```
+
+### 3. Results (Dataset: 100 PDFs, 1003 Pages, ~10.03 avg pages/doc)
+
+
+| Setup | GROBID Client Threads (`--n`) | Paddle Workers (`--workers`) | Total Time | Speed | Throughput |
+|-------|-------------------------------|------------------------------|-----------------------|-------|------------|
+| **GROBID Only** | 4 | N/A | 2m 42.98s (162.02s) | 0.62 docs/sec | 1.62 sec/doc |
+| **GROBID + Paddle** | 4 | 4 | 9m 24.49s (563.57s) | 0.18 docs/sec | 5.64 sec/doc |
