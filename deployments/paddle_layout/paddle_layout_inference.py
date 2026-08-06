@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import modal
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
+from fastapi import HTTPException, Request, UploadFile, File, Form
 from fastapi.responses import JSONResponse
 
 from lm_inference_utils import filter_and_aggregate
