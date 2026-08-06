@@ -98,11 +98,11 @@ Throughput is calculated by dividing 1003 total pages by the Total Real-World Ti
 
 ---
 
-## Experiment 2: Model Pool with Semaphore (Multiple Models per Worker)
+## Experiment 2: Model Pool (Multiple Models per Worker)
 
-In Experiment 1, each worker process loads exactly **1 model** and processes **1 PDF at a time** (sequential, behind a single lock).
+In Experiment 1, each worker process loads exactly **1 model** and processes **1 PDF at a time** (sequential).
 
-In this experiment, we use a different architecture: each worker process loads **M model instances** into a pool, gated by an `asyncio.Semaphore`. This allows a single worker to process **M PDFs in parallel** without waiting.
+In this experiment, we use a different architecture: each worker process loads **M model instances** into a pool. This allows a single worker to process **M PDFs in parallel** without waiting.
 
 **Key difference:**
 - **Approach A** (`paddle_server.py`): `N` workers × 1 model each = `N` total models
@@ -111,15 +111,6 @@ In this experiment, we use a different architecture: each worker process loads *
 ### 1. Start the API Server (Pool variant)
 
 ```shell
-# 1 Worker, 1 Model (same as Approach A baseline)
-python -m local.server.paddle_server_pool --workers 1 --models-per-worker 1 --port 8080
-
-# 1 Worker, 2 Models (1 process, 2 PDFs in parallel)
-python -m local.server.paddle_server_pool --workers 1 --models-per-worker 2 --port 8080
-
-# 1 Worker, 4 Models (1 process, 4 PDFs in parallel)
-python -m local.server.paddle_server_pool --workers 1 --models-per-worker 4 --port 8080
-
 # 2 Workers, 2 Models each (2 processes, 4 PDFs in parallel)
 python -m local.server.paddle_server_pool --workers 2 --models-per-worker 2 --port 8080
 ```
