@@ -272,8 +272,7 @@ def main():
         "--workers-per-device",
         type=int,
         default=1,
-        help="Worker processes per device. >1 needs ~8-10 GB VRAM each "
-        "(default: 1)",
+        help="Worker processes per device. >1 needs ~8-10 GB VRAM each (default: 1)",
     )
     parser.add_argument(
         "--precision",
@@ -293,7 +292,9 @@ def main():
         choices=sorted(GPU_COST_PER_SECOND),
         help="Price the run at this GPU's Modal rate (default: none = no cost column)",
     )
-    parser.add_argument("--no-table", action="store_true", help="Disable table recognition")
+    parser.add_argument(
+        "--no-table", action="store_true", help="Disable table recognition"
+    )
     parser.add_argument(
         "--no-formula", action="store_true", help="Disable formula recognition"
     )

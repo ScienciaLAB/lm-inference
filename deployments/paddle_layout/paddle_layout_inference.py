@@ -1,5 +1,5 @@
 """
-PaddlePaddle Layout Detection 
+PaddlePaddle Layout Detection
 Deploys PaddleOCR LayoutDetection (PP-DocLayout-L) as
 CPU endpoint on Modal.com.
 
@@ -35,7 +35,7 @@ M_PARALLEL = int(os.environ.get("M_PARALLEL", "1"))
 CPU_CORE_PER_CONTAINER = 8.0
 RAM_PER_CONTAINER = max(16384, M_PARALLEL * 4096)
 
-# Modal Image CPU-only PaddlePaddle 
+# Modal Image CPU-only PaddlePaddle
 image = (
     modal.Image.debian_slim(python_version="3.11")
     .apt_install("poppler-utils", "libgomp1", "libgl1", "libglib2.0-0")
@@ -54,13 +54,8 @@ image = (
         f"LayoutDetection(model_name='{MODEL_NAME}')"
         f'"'
     )
-    .env({
-        "N_WORKERS": str(N_WORKERS),
-        "M_PARALLEL": str(M_PARALLEL)
-    })
-    .add_local_file(
-        "lm_inference_utils.py", "/root/lm_inference_utils.py"
-    )
+    .env({"N_WORKERS": str(N_WORKERS), "M_PARALLEL": str(M_PARALLEL)})
+    .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
 )
 
 app = modal.App("paddle-layout-cpu", image=image)
@@ -157,11 +152,11 @@ class PaddleLayoutService:
         print(f"Loading {M_PARALLEL} instance(s) of {MODEL_NAME}...")
         t0 = time.time()
         self.model_pool = queue.Queue()
-        
+
         for i in range(M_PARALLEL):
-            print(f"Loading model instance {i+1}/{M_PARALLEL}...")
+            print(f"Loading model instance {i + 1}/{M_PARALLEL}...")
             self.model_pool.put(LayoutDetection(model_name=MODEL_NAME))
-            
+
         print(f"All {M_PARALLEL} model(s) loaded in {time.time() - t0:.1f}s")
 
     @modal.method()
@@ -187,7 +182,7 @@ class PaddleLayoutService:
         """
         # Block until a model is available in the pool
         model = self.model_pool.get()
-            
+
         try:
             with tempfile.TemporaryDirectory(prefix="paddle_") as tmp_dir:
                 tmp_path = Path(tmp_dir)
@@ -217,7 +212,7 @@ class PaddleLayoutService:
                     bounding_boxes = filter_and_aggregate(
                         bounding_boxes, FILTER_MAP[only]
                     )
-                
+
                 print(f"[DONE] {filename} finished in {inference_time:.1f}s")
 
             return {
@@ -273,9 +268,7 @@ async def parse(request: Request):
         filename = upload.filename or "document.pdf"
 
         if not filename.lower().endswith(".pdf"):
-            raise HTTPException(
-                status_code=400, detail="Only PDF files are supported."
-            )
+            raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
         dpi = int(form.get("dpi", DEFAULT_DPI))
         only = form.get("only", None)
@@ -345,7 +338,7 @@ async def batch(
 
         # Filter to only .pdf files
         pdf_files = [f for f in files if (f.filename or "").lower().endswith(".pdf")]
-        
+
         if not pdf_files:
             raise HTTPException(
                 status_code=400,
@@ -380,9 +373,7 @@ async def batch(
             except Exception as exc:
                 return {"ok": False, "error": str(exc), "filename": filename}
 
-        outcomes = await asyncio.gather(
-            *[_process_one(fb, fn) for fb, fn in pdf_items]
-        )
+        outcomes = await asyncio.gather(*[_process_one(fb, fn) for fb, fn in pdf_items])
 
         wall_time = time.perf_counter() - start
 
@@ -422,6 +413,7 @@ async def batch(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         import traceback
+
         print(f"[ERROR] batch endpoint exception: {type(e).__name__} - {e}")
         traceback.print_exc()
         raise HTTPException(

@@ -36,7 +36,9 @@ NUM_GPUS_USED = 1
 
 # PaddleX downloads its sub-models (detection, recognition, table, formula, ...)
 # on first use. Persist them so only the very first container ever pays for it.
-MODEL_CACHE = modal.Volume.from_name("ppstructurev3-paddlex-cache", create_if_missing=True)
+MODEL_CACHE = modal.Volume.from_name(
+    "ppstructurev3-paddlex-cache", create_if_missing=True
+)
 MODEL_CACHE_PATH = "/root/.paddlex"
 
 image = (
@@ -48,11 +50,11 @@ image = (
     .apt_install(
         "git",
         "wget",
-        "libgl1",            # OpenCV runtime dep
+        "libgl1",  # OpenCV runtime dep
         "libglib2.0-0",
         "libgomp1",
-        "poppler-utils",     # pdf2image / PDF rasterization backend
-        "fonts-dejavu-core", # PaddleX's bundled font download is unreliable
+        "poppler-utils",  # pdf2image / PDF rasterization backend
+        "fonts-dejavu-core",  # PaddleX's bundled font download is unreliable
     )
     # Install paddlepaddle-gpu from PaddlePaddle's own index (it is NOT on PyPI
     # for GPU builds), then paddleocr from PyPI.

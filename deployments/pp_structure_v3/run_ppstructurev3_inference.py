@@ -86,9 +86,17 @@ def run_one(pdf_path):
             )
 
         if response.status_code != 200:
-            print(f"[FAIL] {pdf_path.name}: HTTP {response.status_code} {response.text[:200]}")
-            return {"document": pdf_path.name, "pages": 0, "runtime_sec": 0.0,
-                    "sec_per_page": 0.0, "cost_usd": 0.0, "success": False}
+            print(
+                f"[FAIL] {pdf_path.name}: HTTP {response.status_code} {response.text[:200]}"
+            )
+            return {
+                "document": pdf_path.name,
+                "pages": 0,
+                "runtime_sec": 0.0,
+                "sec_per_page": 0.0,
+                "cost_usd": 0.0,
+                "success": False,
+            }
 
         payload = response.json()
         cost = payload.get("cost_info", {})
@@ -115,8 +123,14 @@ def run_one(pdf_path):
 
     except Exception as e:
         print(f"[ERROR] {pdf_path.name}: {e}")
-        return {"document": pdf_path.name, "pages": 0, "runtime_sec": 0.0,
-                "sec_per_page": 0.0, "cost_usd": 0.0, "success": False}
+        return {
+            "document": pdf_path.name,
+            "pages": 0,
+            "runtime_sec": 0.0,
+            "sec_per_page": 0.0,
+            "cost_usd": 0.0,
+            "success": False,
+        }
 
 
 pdf_files = sorted(Path(args.pdf_folder).glob("*.pdf"))

@@ -17,6 +17,7 @@ import os
 import shutil
 import tempfile
 import time
+
 try:
     import psutil
 except ImportError:
@@ -36,13 +37,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("paddle_server_pool")
 
-_model_pool: List[Any] = []                  # Pool of PaddleDocumentProcessor instances
-_model_semaphore: asyncio.Semaphore = None   # Semaphore to limit concurrent access
+_model_pool: List[Any] = []  # Pool of PaddleDocumentProcessor instances
+_model_semaphore: asyncio.Semaphore = None  # Semaphore to limit concurrent access
 _model_ready = False
 _server_config: Dict[str, Any] = {}
 
 
-#  Pydantic models 
+#  Pydantic models
 class FilterMode(str, Enum):
     """Available filter modes for bounding-box output."""
 
@@ -80,7 +81,7 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-#  Type-aggregation maps 
+#  Type-aggregation maps
 FIGURE_TYPE_AGGREGATION = {
     "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
     "table": ["table", "table_text"],
@@ -97,7 +98,7 @@ GROBID_TYPE_AGGREGATION = {
     **PARATEXT_TYPE_AGGREGATION,
 }
 
-# Lifespan: load M models into pool at startup 
+# Lifespan: load M models into pool at startup
 _start_time: float = 0.0
 
 
@@ -113,7 +114,9 @@ async def lifespan(app: FastAPI):
 
     logger.info(
         "Loading %d PaddlePaddle model(s) '%s' (dpi=%d) …",
-        models_per_worker, model_name, dpi,
+        models_per_worker,
+        model_name,
+        dpi,
     )
     load_start = time.time()
 
@@ -134,7 +137,8 @@ async def lifespan(app: FastAPI):
     _model_ready = True
     logger.info(
         "%d model(s) loaded in %.1f s",
-        models_per_worker, time.time() - load_start,
+        models_per_worker,
+        time.time() - load_start,
     )
 
     yield
@@ -146,7 +150,7 @@ async def lifespan(app: FastAPI):
     logger.info("Server shutting down, %d model(s) released.", models_per_worker)
 
 
-#  FastAPI app 
+#  FastAPI app
 app = FastAPI(
     title="PaddlePaddle Layout Detection Server (Pool)",
     description=(
@@ -160,7 +164,7 @@ app = FastAPI(
 )
 
 
-#  Endpoints 
+#  Endpoints
 @app.get(
     "/health",
     response_model=HealthResponse,
@@ -260,7 +264,12 @@ async def process_pdf(
             model = _model_pool.pop()
             try:
                 result, elements = await asyncio.to_thread(
-                    _run_inference, model, str(pdf_path), str(tmp_dir), filter, merge_captions
+                    _run_inference,
+                    model,
+                    str(pdf_path),
+                    str(tmp_dir),
+                    filter,
+                    merge_captions,
                 )
             finally:
                 _model_pool.append(model)
@@ -302,8 +311,6 @@ async def process_pdf(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-
-
 
 
 def _run_inference(
@@ -350,9 +357,7 @@ def _run_inference(
             merged_elements.sort(key=lambda x: (x["page"], x["y"]))
             elements = merged_elements
         except ImportError:
-            logger.warning(
-                "caption_merging module not available, skipping merge."
-            )
+            logger.warning("caption_merging module not available, skipping merge.")
 
     # Apply filter if requested
     if filter_mode and not merge_captions:
@@ -364,8 +369,6 @@ def _run_inference(
             elements = filter_and_aggregate(elements, GROBID_TYPE_AGGREGATION)
 
     return result, elements
-
-
 
 
 def main():
@@ -437,7 +440,9 @@ Examples:
     total_models = args.workers * args.models_per_worker
     logger.info(
         "Total model instances: %d (workers=%d × models_per_worker=%d)",
-        total_models, args.workers, args.models_per_worker,
+        total_models,
+        args.workers,
+        args.models_per_worker,
     )
 
     import uvicorn

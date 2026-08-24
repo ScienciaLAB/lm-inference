@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 import time
+
 try:
     import psutil
 except ImportError:
@@ -33,11 +34,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("paddle_server")
 
-# Global state 
+# Global state
 _processor = None
 _model_ready = False
 _server_config: Dict[str, Any] = {}
 _inference_lock = asyncio.Lock()
+
 
 #  Pydantic models
 class FilterMode(str, Enum):
@@ -76,7 +78,7 @@ class ErrorResponse(BaseModel):
     detail: str
 
 
-# Type-aggregation maps 
+# Type-aggregation maps
 FIGURE_TYPE_AGGREGATION = {
     "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
     "table": ["table", "table_text"],
@@ -119,7 +121,7 @@ async def lifespan(app: FastAPI):
     _model_ready = True
     logger.info("Model loaded in %.1f s", time.time() - load_start)
 
-    yield  
+    yield
 
     # Cleanup on shutdown
     _model_ready = False
@@ -330,9 +332,7 @@ def _run_inference(
             merged_elements.sort(key=lambda x: (x["page"], x["y"]))
             elements = merged_elements
         except ImportError:
-            logger.warning(
-                "caption_merging module not available, skipping merge."
-            )
+            logger.warning("caption_merging module not available, skipping merge.")
 
     # Apply filter if requested
     if filter_mode and not merge_captions:
