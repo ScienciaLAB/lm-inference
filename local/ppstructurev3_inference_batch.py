@@ -172,6 +172,14 @@ def _process_one(pdf_path_str):
                 images.update(md_info.get("markdown_images", {}) or {})
 
         markdown = _pipeline.concatenate_markdown_pages(markdown_pages)
+        # paddleocr >= 3.4 returns a MarkdownResult here instead of a str; older
+        # versions return the concatenated text directly. Accept both.
+        if not isinstance(markdown, str):
+            markdown = (
+                getattr(markdown, "markdown_texts", None)
+                or (markdown.get("markdown_texts") if hasattr(markdown, "get") else None)
+                or str(markdown)
+            )
         runtime = time.time() - t0
 
         md_path.write_text(markdown, encoding="utf-8")
