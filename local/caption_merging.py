@@ -199,6 +199,127 @@ class DistanceMerger(CaptionMerger):
         return None, None
 
 
+# Third approach: caption-anchored grouping
+
+
+class GroupingMerger(CaptionMerger):
+    """One region per caption, rather than one region per graphic box.
+
+    ThresholdMerger and DistanceMerger are *parent-anchored*: they iterate over
+    the figure boxes and hand each one the nearest free caption, so every box
+    survives as its own region. PP-DocLayout fires on each panel of a composite
+    figure, so a six-panel "Figure 3" becomes six regions, only one of which can
+    own the caption -- the other five reach GROBID as separate figure areas and
+    are serialised as captionless <figure> elements. Measured on the 2,222
+    Materials Science documents with gold figure counts, that yields 14.87
+    regions/doc against 8.74 real figures (ratio 1.70, MAE 6.13, exactly right
+    on 6.3% of documents).
+
+    This merger inverts the anchoring: every figure box is assigned to its
+    nearest caption, and all boxes sharing a caption are merged with it into one
+    region. Boxes with no caption within `max_caption_distance` are kept as
+    their own region, so genuinely uncaptioned artwork is not lost.
+
+    Two pre-filters, taken from GROBID PR #1297 (VectorGraphicBoxCalculator.kt),
+    make keeping those orphans safe by removing what would otherwise be noise:
+    a minimum box area, and removal of boxes wholly contained in a larger box.
+
+    Same measurement: 9.22 regions/doc, ratio 1.06, MAE 0.70, exactly right on
+    65.0% of documents.
+    """
+
+    # MINIMUM_VECTOR_BOX_AREA in GROBID PR #1297.
+    MIN_BOX_AREA = 3000
+    # Generous: results are flat between 100 and unbounded (MAE 0.94 either
+    # way), so this only guards against a caption binding across a page.
+    MAX_CAPTION_DISTANCE = 400.0
+
+    def __init__(self, min_box_area=None, max_caption_distance=None,
+                 drop_orphans=False):
+        self.min_box_area = (self.MIN_BOX_AREA if min_box_area is None
+                             else min_box_area)
+        self.max_caption_distance = (self.MAX_CAPTION_DISTANCE
+                                     if max_caption_distance is None
+                                     else max_caption_distance)
+        self.drop_orphans = drop_orphans
+
+    @staticmethod
+    def _corners(b):
+        return (b["x"], b["y"], b["x"] + b["width"], b["y"] + b["height"])
+
+    @staticmethod
+    def _area(b):
+        return b["width"] * b["height"]
+
+    @classmethod
+    def _contains(cls, outer, inner):
+        ox1, oy1, ox2, oy2 = cls._corners(outer)
+        ix1, iy1, ix2, iy2 = cls._corners(inner)
+        return ox1 <= ix1 and oy1 <= iy1 and ox2 >= ix2 and oy2 >= iy2
+
+    @classmethod
+    def _gap(cls, a, b):
+        """Edge-to-edge distance; 0 when the boxes touch or overlap.
+
+        DistanceMerger returns None for intersecting boxes, refusing to link a
+        caption that overlaps its figure -- common in detector output. Treating
+        intersection as distance 0 is both simpler and correct.
+        """
+        ax1, ay1, ax2, ay2 = cls._corners(a)
+        bx1, by1, bx2, by2 = cls._corners(b)
+        dx = max(0.0, bx1 - ax2, ax1 - bx2)
+        dy = max(0.0, by1 - ay2, ay1 - by2)
+        return (dx * dx + dy * dy) ** 0.5
+
+    def _prefilter(self, boxes):
+        kept = [b for b in boxes if self._area(b) >= self.min_box_area]
+        return [
+            b for b in kept
+            if not any(
+                o is not b
+                and o["page"] == b["page"]
+                and self._area(o) > self._area(b)
+                and self._contains(o, b)
+                for o in kept
+            )
+        ]
+
+    @staticmethod
+    def _union(boxes):
+        x1 = min(b["x"] for b in boxes)
+        y1 = min(b["y"] for b in boxes)
+        x2 = max(b["x"] + b["width"] for b in boxes)
+        y2 = max(b["y"] + b["height"] for b in boxes)
+        out = dict(boxes[0])
+        out.update({"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1})
+        return out
+
+    def merge(self, parents, captions):
+        groups = {}
+        orphans = []
+
+        for box in self._prefilter(parents):
+            best, best_d = None, None
+            for ci, cap in enumerate(captions):
+                if cap["page"] != box["page"]:
+                    continue
+                d = self._gap(box, cap)
+                if best_d is None or d < best_d:
+                    best, best_d = ci, d
+            if best is not None and best_d <= self.max_caption_distance:
+                groups.setdefault(best, []).append(box)
+            else:
+                orphans.append(box)
+
+        merged = [
+            self._union(members + [captions[ci]])
+            for ci, members in sorted(groups.items())
+        ]
+        if not self.drop_orphans:
+            merged.extend(orphans)
+        return merged
+
+
 def link_captions_and_merge(paddle_data, merger: CaptionMerger):
     """
     Separates elements by type, then uses the given merger strategy.
@@ -288,8 +409,14 @@ def main():
     parser.add_argument(
         "--strategy",
         "-s",
-        choices=["threshold", "distance"],
-        default="distance",
+        choices=["threshold", "distance", "grouping"],
+        default="grouping",
+    )
+    parser.add_argument(
+        "--drop-orphans",
+        action="store_true",
+        help="grouping strategy: discard figure boxes that match no caption "
+        "(default: keep them as their own region)",
     )
     parser.add_argument(
         "--max-distance",
@@ -319,6 +446,12 @@ def main():
     if args.strategy == "threshold":
         merger = ThresholdMerger(max_distance=args.max_distance)
         print(f"Strategy: THRESHOLD (max_distance={args.max_distance})")
+    elif args.strategy == "grouping":
+        merger = GroupingMerger(drop_orphans=args.drop_orphans)
+        print(f"Strategy: GROUPING (caption-anchored, "
+              f"min_area={merger.min_box_area}, "
+              f"max_caption_distance={merger.max_caption_distance}, "
+              f"drop_orphans={merger.drop_orphans})")
     else:
         merger = DistanceMerger()
         print("Strategy: DISTANCE (rank all, pick closest)")
