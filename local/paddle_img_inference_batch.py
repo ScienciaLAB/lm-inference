@@ -13,6 +13,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from multiprocessing import cpu_count
 import threading
 
+from .paddle_options import (
+    LAYOUT_MERGE_BBOXES_MODES,
+    LAYOUT_MODEL_CHOICES,
+    parse_threshold,
+)
+
 
 class ImageBatchProcessor:
     def __init__(
@@ -20,6 +26,9 @@ class ImageBatchProcessor:
         model_name="PP-DocLayout-S",
         workers=None,
         force=False,
+        engine=None,
+        threshold=None,
+        layout_merge_bboxes_mode=None,
     ):
         """
         Initialize the batch processor for images.
@@ -27,6 +36,11 @@ class ImageBatchProcessor:
         self.model_name = model_name
         self.workers = workers if workers else cpu_count()
         self.force = force
+        self.detection_options = {
+            "engine": engine,
+            "threshold": threshold,
+            "layout_merge_bboxes_mode": layout_merge_bboxes_mode,
+        }
         self.progress_lock = threading.Lock()
         self.processed_count = 0
         self.total_files = 0
@@ -69,7 +83,7 @@ class ImageBatchProcessor:
 
             # 2. Run Prediction directly on image path
             # layout_nms=True cleans up overlapping boxes
-            preds = processor.model.predict([img_path], layout_nms=True)
+            preds = processor.model.predict([img_path], **processor.predict_options())
 
             result = preds[0]
 
@@ -159,6 +173,7 @@ class ImageBatchProcessor:
                     model_name=self.model_name,
                     dpi=72,  # Irrelevant for images, but required by init
                     preload_model=True,
+                    **self.detection_options,
                 )
                 processors.append(processor)
 
@@ -228,9 +243,30 @@ def main():
 
     parser.add_argument(
         "--model-name",
-        choices=["PP-DocLayout-L", "PP-DocLayout-M", "PP-DocLayout-S"],
+        choices=LAYOUT_MODEL_CHOICES,
         default="PP-DocLayout-S",
         help="Model name",
+    )
+
+    parser.add_argument(
+        "--engine",
+        help="Inference backend passed to PaddleOCR, e.g. 'transformers' "
+        "(requires paddleocr >= 3.5; left to the PaddleOCR default otherwise)",
+    )
+
+    parser.add_argument(
+        "--threshold",
+        type=parse_threshold,
+        help="Detection score threshold: a single value (0.4) or per-class "
+        "values as class:score pairs, keyed by class index or label "
+        "(e.g. inline_formula:0.2 to keep low-confidence embedded math)",
+    )
+
+    parser.add_argument(
+        "--layout-merge-bboxes-mode",
+        choices=LAYOUT_MERGE_BBOXES_MODES,
+        help="How to merge overlapping boxes: 'union' keeps the envelope, "
+        "'large' keeps the outer box, 'small' keeps the inner one",
     )
 
     parser.add_argument(
@@ -253,6 +289,9 @@ def main():
         model_name=args.model_name,
         workers=args.workers,
         force=args.force,
+        engine=args.engine,
+        threshold=args.threshold,
+        layout_merge_bboxes_mode=args.layout_merge_bboxes_mode,
     )
 
     success = processor.process_images(args.input_dir, args.output)

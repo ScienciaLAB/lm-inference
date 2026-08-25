@@ -64,7 +64,7 @@ app = modal.App("paddle-layout-cpu", image=image)
 FIGURE_TYPE_AGGREGATION = {
     "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
     "table": ["table", "table_text"],
-    "equation": ["equation", "formula", "equation_text"],
+    "equation": ["equation", "formula", "equation_text", "display_formula"],
 }
 
 PARATEXT_TYPE_AGGREGATION = {

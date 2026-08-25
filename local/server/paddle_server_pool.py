@@ -30,6 +30,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from local.paddle_options import (
+    LAYOUT_MERGE_BBOXES_MODES,
+    LAYOUT_MODEL_CHOICES,
+    parse_threshold,
+)
+
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -85,7 +91,7 @@ class ErrorResponse(BaseModel):
 FIGURE_TYPE_AGGREGATION = {
     "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
     "table": ["table", "table_text"],
-    "equation": ["equation", "formula", "equation_text"],
+    "equation": ["equation", "formula", "equation_text", "display_formula"],
 }
 
 PARATEXT_TYPE_AGGREGATION = {
@@ -111,6 +117,11 @@ async def lifespan(app: FastAPI):
     model_name = os.environ.get("PADDLE_MODEL_NAME", "PP-DocLayout-L")
     dpi = int(os.environ.get("PADDLE_DPI", "72"))
     models_per_worker = int(os.environ.get("PADDLE_MODELS_PER_WORKER", "1"))
+    # Options are handed over as environment variables because uvicorn workers
+    # are separate processes that re-import this module.
+    raw_threshold = os.environ.get("PADDLE_THRESHOLD")
+    threshold = parse_threshold(raw_threshold) if raw_threshold else None
+    layout_merge_bboxes_mode = os.environ.get("PADDLE_LAYOUT_MERGE_BBOXES_MODE") or None
 
     logger.info(
         "Loading %d PaddlePaddle model(s) '%s' (dpi=%d) …",
@@ -129,6 +140,8 @@ async def lifespan(app: FastAPI):
             model_name=model_name,
             dpi=dpi,
             preload_model=True,
+            threshold=threshold,
+            layout_merge_bboxes_mode=layout_merge_bboxes_mode,
         )
         _model_pool.append(processor)
 
@@ -394,13 +407,7 @@ Examples:
     )
     parser.add_argument(
         "--model-name",
-        choices=[
-            "PP-DocLayout-L",
-            "PP-DocLayout-M",
-            "PP-DocLayout-S",
-            "PP-DocLayoutV2",
-            "PP-DocBlockLayout",
-        ],
+        choices=LAYOUT_MODEL_CHOICES,
         default="PP-DocLayout-L",
         help="PaddlePaddle model for layout detection (default: PP-DocLayout-L)",
     )
@@ -409,6 +416,18 @@ Examples:
         type=int,
         default=72,
         help="DPI for PDF to image conversion (default: 72)",
+    )
+    parser.add_argument(
+        "--threshold",
+        help="Detection score threshold: a single value (0.4) or per-class "
+        "values as class:score pairs, keyed by class index or label "
+        "(e.g. inline_formula:0.2 to keep low-confidence embedded math)",
+    )
+    parser.add_argument(
+        "--layout-merge-bboxes-mode",
+        choices=LAYOUT_MERGE_BBOXES_MODES,
+        help="How to merge overlapping boxes: 'union' keeps the envelope, "
+        "'large' keeps the outer box, 'small' keeps the inner one",
     )
     parser.add_argument(
         "--workers",
@@ -435,6 +454,12 @@ Examples:
 
     os.environ["PADDLE_MODEL_NAME"] = args.model_name
     os.environ["PADDLE_DPI"] = str(args.dpi)
+    if args.threshold:
+        # Validated here so a malformed value fails before the workers start
+        parse_threshold(args.threshold)
+        os.environ["PADDLE_THRESHOLD"] = args.threshold
+    if args.layout_merge_bboxes_mode:
+        os.environ["PADDLE_LAYOUT_MERGE_BBOXES_MODE"] = args.layout_merge_bboxes_mode
     os.environ["PADDLE_MODELS_PER_WORKER"] = str(args.models_per_worker)
 
     total_models = args.workers * args.models_per_worker

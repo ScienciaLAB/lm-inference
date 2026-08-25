@@ -81,6 +81,10 @@ python -m local.paddle_inference <input_pdf> [options]
 | `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
 | `--dpi` | DPI for PDF to image conversion | `70` |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
+| `--engine` | PaddleOCR inference backend, e.g. `transformers` (needs paddleocr >= 3.5) | PaddleOCR default |
+| `--threshold` | Detection score threshold, globally or per class | model default (0.5) |
+| `--layout-merge-bboxes-mode` | How overlapping boxes are merged: `union`, `large`, `small` | model default |
+| `--batch-size` | Pages per inference batch | CPU count |
 | `--only` | Filter output to specific element types | - |
 | `--cleanup-images` | Clean up intermediate files, keep only aggregated JSON | `False` |
 
@@ -90,7 +94,36 @@ python -m local.paddle_inference <input_pdf> [options]
 - `PP-DocLayout-M` - Medium model (balanced)
 - `PP-DocLayout-L` - Large model (most accurate)
 - `PP-DocLayoutV2` - Version 2 model
+- `PP-DocLayoutV3` - Version 3 model, instance segmentation (see below)
 - `PP-DocBlockLayout` - Block-level layout model
+
+#### PP-DocLayoutV3
+
+`PP-DocLayoutV3` is the instance-segmentation successor of `PP-DocLayoutV2`. It
+differs from the `PP-DocLayout-{S,M,L}` detectors in two ways that matter here:
+
+- **Finer label set** (25 classes). Notably the single `formula` class is split
+  into `display_formula` and `inline_formula`, and there are new
+  `vision_footnote`, `vertical_text`, `header_image` and `footer_image` classes.
+  `--only display`/`grobid` maps `display_formula` to `equation`; `inline_formula`
+  is deliberately **not** mapped, since inline math sits inside running text and
+  masking it out would break the text flow handed to GROBID.
+- **Polygons in addition to boxes.** Each detection carries `polygon_points`
+  next to `coordinate`; the aggregated `<name>.json` still holds rectangles only.
+
+Class indices for `--threshold` follow the model's label list in alphabetical
+order, so `inline_formula` is class 15. Both spellings work:
+
+```shell
+# Lower the confidence needed to keep inline formulas (embedded math)
+python -m local.paddle_inference document.pdf --model-name PP-DocLayoutV3 \
+  --threshold inline_formula:0.2 --layout-merge-bboxes-mode small
+python -m local.paddle_inference document.pdf --model-name PP-DocLayoutV3 \
+  --threshold 15:0.2 --layout-merge-bboxes-mode small
+```
+
+`--layout-merge-bboxes-mode small` keeps the inner box when two detections
+overlap, which is what you want for figures made of several panels.
 
 #### Examples
 
@@ -99,6 +132,7 @@ python -m local.paddle_inference document.pdf
 python -m local.paddle_inference document.pdf --output ./results --model-name PP-DocLayout-L
 python -m local.paddle_inference document.pdf -o ./results --only display --cleanup-images
 python -m local.paddle_inference document.pdf --dpi 150 --model-name PP-DocLayout-M
+python -m local.paddle_inference document.pdf --model-name PP-DocLayoutV3 --threshold inline_formula:0.2
 ```
 
 ---
@@ -121,6 +155,10 @@ python -m local.paddle_inference_batch <input_dir> [options]
 | `--dpi` | DPI for PDF to image conversion | `70` |
 | `--workers`, `-w` | Number of parallel workers | CPU count (max 4) |
 | `--temp-dir` | Temporary directory for processing | auto-generated |
+| `--engine` | PaddleOCR inference backend, e.g. `transformers` (needs paddleocr >= 3.5) | PaddleOCR default |
+| `--threshold` | Detection score threshold, globally or per class | model default (0.5) |
+| `--layout-merge-bboxes-mode` | How overlapping boxes are merged: `union`, `large`, `small` | model default |
+| `--batch-size` | Pages per inference batch | CPU count |
 | `--only` | Filter output to specific element types | - |
 | `--cleanup-images` | Clean up intermediate files | `False` |
 | `--force` | Reprocess all files even if output already exists | `False` |
@@ -152,6 +190,9 @@ python -m local.paddle_img_inference_batch <input_dir> [options]
 | `--output`, `-o` | Output directory for results | `output` |
 | `--model-name` | Model name for layout detection | `PP-DocLayout-S` |
 | `--workers`, `-w` | Number of parallel workers | CPU count |
+| `--engine` | PaddleOCR inference backend, e.g. `transformers` (needs paddleocr >= 3.5) | PaddleOCR default |
+| `--threshold` | Detection score threshold, globally or per class | model default (0.5) |
+| `--layout-merge-bboxes-mode` | How overlapping boxes are merged: `union`, `large`, `small` | model default |
 | `--force` | Reprocess all files even if output already exists | `False` |
 
 #### Examples
@@ -159,6 +200,8 @@ python -m local.paddle_img_inference_batch <input_dir> [options]
 ```shell
 python -m local.paddle_img_inference_batch ./images -o ./results --model-name PP-DocLayout-M --workers 4
 python -m local.paddle_img_inference_batch ./images -o ./results --force
+python -m local.paddle_img_inference_batch ./images -o ./results --model-name PP-DocLayoutV3 \
+  --threshold inline_formula:0.2 --layout-merge-bboxes-mode small
 ```
 
 ---

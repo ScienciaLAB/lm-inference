@@ -2,9 +2,15 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Union
 
 from .base_inference import BaseDocumentProcessor
+from .paddle_options import (
+    LAYOUT_MERGE_BBOXES_MODES,
+    LAYOUT_MODEL_CHOICES,
+    parse_threshold,
+    resolve_threshold,
+)
 from lm_inference_utils import filter_and_aggregate
 
 
@@ -15,7 +21,16 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
         dpi: int = 72,
         temp_dir: str = None,
         preload_model: bool = False,
+        engine: str = None,
+        threshold: Union[float, Dict[Union[int, str], float]] = None,
+        layout_merge_bboxes_mode: str = None,
+        batch_size: int = None,
     ):
+        self.engine = engine
+        self.threshold = threshold
+        self.layout_merge_bboxes_mode = layout_merge_bboxes_mode
+        self.batch_size = batch_size
+        self.labels: Optional[List[str]] = None
         super().__init__(model_name, dpi, temp_dir, preload_model)
 
     def _load_model(self) -> None:
@@ -24,9 +39,32 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
 
             print("Loading model...")
             start_time = time.time()
-            self.model = LayoutDetection(model_name=self.model_name)
+            kwargs = {"model_name": self.model_name}
+            if self.engine is not None:
+                # `engine` selects the inference backend (e.g. "transformers")
+                # and only exists on paddleocr >= 3.5, so it is forwarded only
+                # when explicitly requested.
+                kwargs["engine"] = self.engine
+            self.model = LayoutDetection(**kwargs)
+            self.labels = self._read_label_list()
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f} seconds")
+
+    def _read_label_list(self) -> Optional[List[str]]:
+        """Label vocabulary of the loaded model, used to resolve label-name thresholds."""
+        try:
+            return self.model.paddlex_predictor.config["label_list"]
+        except (AttributeError, KeyError, TypeError):
+            return None
+
+    def predict_options(self) -> Dict[str, Any]:
+        """Keyword arguments forwarded to every `model.predict()` call."""
+        options: Dict[str, Any] = {"layout_nms": True}
+        if self.threshold is not None:
+            options["threshold"] = resolve_threshold(self.threshold, self.labels)
+        if self.layout_merge_bboxes_mode is not None:
+            options["layout_merge_bboxes_mode"] = self.layout_merge_bboxes_mode
+        return options
 
     def pdf_to_images(self, pdf_path: str, output_dir: Path) -> List[Path]:
         from pdf2image import convert_from_path
@@ -51,7 +89,9 @@ class PaddleDocumentProcessor(BaseDocumentProcessor):
 
         start_time = time.time()
         output = self.model.predict(
-            image_path_strings, batch_size=os.cpu_count(), layout_nms=True
+            image_path_strings,
+            batch_size=self.batch_size or os.cpu_count(),
+            **self.predict_options(),
         )
         inference_time = time.time() - start_time
         print(f"Process completed in {inference_time:.2f} seconds")
@@ -172,13 +212,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--model-name",
-        choices=[
-            "PP-DocLayout-L",
-            "PP-DocLayout-M",
-            "PP-DocLayout-S",
-            "PP-DocLayoutV2",
-            "PP-DocBlockLayout",
-        ],
+        choices=LAYOUT_MODEL_CHOICES,
         default="PP-DocLayout-S",
         help="Model name for layout detection (default: PP-DocLayout-S)",
     )
@@ -191,6 +225,29 @@ if __name__ == "__main__":
     parser.add_argument(
         "--temp-dir",
         help="Temporary directory for processing (default: auto-generated)",
+    )
+    parser.add_argument(
+        "--engine",
+        help="Inference backend passed to PaddleOCR, e.g. 'transformers' "
+        "(requires paddleocr >= 3.5; left to the PaddleOCR default otherwise)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=parse_threshold,
+        help="Detection score threshold: a single value (0.4) or per-class "
+        "values as class:score pairs, keyed by class index or label "
+        "(e.g. inline_formula:0.2 to keep low-confidence embedded math)",
+    )
+    parser.add_argument(
+        "--layout-merge-bboxes-mode",
+        choices=LAYOUT_MERGE_BBOXES_MODES,
+        help="How to merge overlapping boxes: 'union' keeps the envelope, "
+        "'large' keeps the outer box, 'small' keeps the inner one",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Pages per inference batch (default: CPU count)",
     )
     parser.add_argument(
         "--only",
@@ -214,6 +271,10 @@ if __name__ == "__main__":
         dpi=args.dpi,
         temp_dir=args.temp_dir,
         preload_model=True,
+        engine=args.engine,
+        threshold=args.threshold,
+        layout_merge_bboxes_mode=args.layout_merge_bboxes_mode,
+        batch_size=args.batch_size,
     )
 
     result = processor.process_document(args.input, args.output)
@@ -227,7 +288,7 @@ if __name__ == "__main__":
         figure_type_aggregation = {
             "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
             "table": ["table", "table_text"],
-            "equation": ["equation", "formula", "equation_text"],
+            "equation": ["equation", "formula", "equation_text", "display_formula"],
         }
 
         paratext_type_aggregation = {"headnote": ["header"], "footer": ["footer"]}
