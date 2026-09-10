@@ -16,13 +16,17 @@ image = (
 @app.function(
     image=image,
     timeout=7200,
-    gpu=["A100-40GB", "A10", "L4", "T4"],
-    scaledown_window=60,
+    gpu="A100-40GB",
+    scaledown_window=300,
+    min_containers=1,
+    max_containers=4,
     cpu=4.0,
     memory=16 * 1024,
     env={"DOCLING_SERVE_MAX_SYNC_WAIT": "7100"},
 )
-@modal.concurrent(max_inputs=16)
+# One doc per container so the 4 client threads fan out to 4 GPUs instead of
+# packing onto one; same pool shape as the olmOCR / dots.ocr / MinerU services.
+@modal.concurrent(max_inputs=1)
 @modal.asgi_app()
 def docling_serve_fastapi_app_with_lifespan():
     from fastapi import Request, Response
