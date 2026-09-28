@@ -27,6 +27,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
+from local.paddle_options import (
+    LAYOUT_MERGE_BBOXES_MODES,
+    LAYOUT_MODEL_CHOICES,
+    parse_threshold,
+)
+
 # Logging
 logging.basicConfig(
     level=logging.INFO,
@@ -82,7 +88,7 @@ class ErrorResponse(BaseModel):
 FIGURE_TYPE_AGGREGATION = {
     "figure": ["figure", "image", "chart", "figure_text", "chart_text"],
     "table": ["table", "table_text"],
-    "equation": ["equation", "formula", "equation_text"],
+    "equation": ["equation", "formula", "equation_text", "display_formula"],
 }
 
 PARATEXT_TYPE_AGGREGATION = {
@@ -117,6 +123,8 @@ async def lifespan(app: FastAPI):
         model_name=model_name,
         dpi=dpi,
         preload_model=True,
+        threshold=_server_config.get("threshold"),
+        layout_merge_bboxes_mode=_server_config.get("layout_merge_bboxes_mode"),
     )
     _model_ready = True
     logger.info("Model loaded in %.1f s", time.time() - load_start)
@@ -376,13 +384,7 @@ Examples:
     )
     parser.add_argument(
         "--model-name",
-        choices=[
-            "PP-DocLayout-L",
-            "PP-DocLayout-M",
-            "PP-DocLayout-S",
-            "PP-DocLayoutV2",
-            "PP-DocBlockLayout",
-        ],
+        choices=LAYOUT_MODEL_CHOICES,
         default="PP-DocLayout-L",
         help="PaddlePaddle model for layout detection (default: PP-DocLayout-L)",
     )
@@ -391,6 +393,19 @@ Examples:
         type=int,
         default=72,
         help="DPI for PDF to image conversion (default: 72)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=parse_threshold,
+        help="Detection score threshold: a single value (0.4) or per-class "
+        "values as class:score pairs, keyed by class index or label "
+        "(e.g. inline_formula:0.2 to keep low-confidence embedded math)",
+    )
+    parser.add_argument(
+        "--layout-merge-bboxes-mode",
+        choices=LAYOUT_MERGE_BBOXES_MODES,
+        help="How to merge overlapping boxes: 'union' keeps the envelope, "
+        "'large' keeps the outer box, 'small' keeps the inner one",
     )
     parser.add_argument(
         "--workers",
@@ -410,6 +425,8 @@ Examples:
     # Store config so the lifespan function can read it
     _server_config["model_name"] = args.model_name
     _server_config["dpi"] = args.dpi
+    _server_config["threshold"] = args.threshold
+    _server_config["layout_merge_bboxes_mode"] = args.layout_merge_bboxes_mode
 
     import uvicorn
 

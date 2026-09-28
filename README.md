@@ -44,6 +44,7 @@ The `lm_inference_utils.py` module is imported directly as a flat module (no pac
 | Model | Description | Link |
 |---|---|---|
 | PaddlePaddle DocLayout (S, M, L) | Lightweight document layout analysis models for structure recognition and parsing. | https://github.com/paddlepaddle/PaddleOCR |
+| PaddlePaddle DocLayoutV3 | Instance-segmentation layout model with a finer 25-class vocabulary (display vs. inline formulas, vision footnotes). | https://github.com/paddlepaddle/PaddleOCR |
 | PaddlePaddle Block | Lightweight OCR model for text detection and recognition of main body of documents. | |
 
 ---

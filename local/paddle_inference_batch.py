@@ -12,11 +12,17 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from multiprocessing import cpu_count, set_start_method
 import json
 
+from .paddle_options import (
+    LAYOUT_MERGE_BBOXES_MODES,
+    LAYOUT_MODEL_CHOICES,
+    parse_threshold,
+)
+
 # Per-process global, set once by _init_worker
 _worker_processor = None
 
 
-def _init_worker(model_name, dpi, temp_dir):
+def _init_worker(model_name, dpi, temp_dir, detection_options=None):
     """Initializer run once per worker process — loads the model."""
     global _worker_processor
 
@@ -29,6 +35,7 @@ def _init_worker(model_name, dpi, temp_dir):
         dpi=dpi,
         temp_dir=temp_dir,
         preload_model=True,
+        **(detection_options or {}),
     )
     print(f"[worker-{os.getpid()}] Model loaded in {time.time() - t0:.1f}s")
 
@@ -66,7 +73,12 @@ def process_single_pdf_worker(args):
                         "chart_text",
                     ],
                     "table": ["table", "table_text"],
-                    "equation": ["equation", "formula", "equation_text"],
+                    "equation": [
+                        "equation",
+                        "formula",
+                        "equation_text",
+                        "display_formula",
+                    ],
                 }
 
                 paratext_type_aggregation = {
@@ -134,6 +146,10 @@ class BatchProcessor:
         only=None,
         cleanup_images=False,
         force=False,
+        engine=None,
+        threshold=None,
+        layout_merge_bboxes_mode=None,
+        batch_size=None,
     ):
         """
         Initialize the batch processor.
@@ -145,6 +161,10 @@ class BatchProcessor:
             workers (int): Number of parallel workers (default: CPU count)
             only (str): Filter type - "display", "paratext", or "grobid"
             cleanup_images (bool): Whether to clean up intermediate image files
+            engine (str): PaddleOCR inference backend (paddleocr >= 3.5)
+            threshold (float|dict): Detection score threshold, globally or per class
+            layout_merge_bboxes_mode (str): How to merge overlapping boxes
+            batch_size (int): Pages per inference batch
         """
         self.model_name = model_name
         self.dpi = dpi
@@ -154,6 +174,12 @@ class BatchProcessor:
         self.only = only
         self.cleanup_images = cleanup_images
         self.force = force
+        self.detection_options = {
+            "engine": engine,
+            "threshold": threshold,
+            "layout_merge_bboxes_mode": layout_merge_bboxes_mode,
+            "batch_size": batch_size,
+        }
         self.processed_count = 0
         self.skipped_files = []
         self.total_files = 0
@@ -266,7 +292,12 @@ class BatchProcessor:
             with ProcessPoolExecutor(
                 max_workers=self.workers,
                 initializer=_init_worker,
-                initargs=(self.model_name, self.dpi, self.temp_dir),
+                initargs=(
+                    self.model_name,
+                    self.dpi,
+                    self.temp_dir,
+                    self.detection_options,
+                ),
             ) as executor:
                 # Submit all tasks
                 future_to_pdf = {
@@ -354,13 +385,7 @@ Examples:
 
     parser.add_argument(
         "--model-name",
-        choices=[
-            "PP-DocLayout-L",
-            "PP-DocLayout-M",
-            "PP-DocLayout-S",
-            "PP-DocLayoutV2",
-            "PP-DocBlockLayout",
-        ],
+        choices=LAYOUT_MODEL_CHOICES,
         default="PP-DocLayout-S",
         help="Model name for layout detection (default: PP-DocLayout-S)",
     )
@@ -383,6 +408,33 @@ Examples:
     parser.add_argument(
         "--temp-dir",
         help="Temporary directory for processing (default: auto-generated)",
+    )
+
+    parser.add_argument(
+        "--engine",
+        help="Inference backend passed to PaddleOCR, e.g. 'transformers' "
+        "(requires paddleocr >= 3.5; left to the PaddleOCR default otherwise)",
+    )
+
+    parser.add_argument(
+        "--threshold",
+        type=parse_threshold,
+        help="Detection score threshold: a single value (0.4) or per-class "
+        "values as class:score pairs, keyed by class index or label "
+        "(e.g. inline_formula:0.2 to keep low-confidence embedded math)",
+    )
+
+    parser.add_argument(
+        "--layout-merge-bboxes-mode",
+        choices=LAYOUT_MERGE_BBOXES_MODES,
+        help="How to merge overlapping boxes: 'union' keeps the envelope, "
+        "'large' keeps the outer box, 'small' keeps the inner one",
+    )
+
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        help="Pages per inference batch (default: CPU count)",
     )
 
     parser.add_argument(
@@ -418,6 +470,10 @@ Examples:
         only=args.only,
         cleanup_images=args.cleanup_images,
         force=args.force,
+        engine=args.engine,
+        threshold=args.threshold,
+        layout_merge_bboxes_mode=args.layout_merge_bboxes_mode,
+        batch_size=args.batch_size,
     )
 
     success = processor.process_documents(args.input_dir, args.output)
