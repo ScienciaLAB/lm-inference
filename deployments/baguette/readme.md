@@ -69,7 +69,7 @@ paragraph item also carries its `text`.
 
 | Field | Description |
 |---|---|
-| `paragraphs` | One item per paragraph: `index`, `is_boilerplate`, `datasets`, `software`. An item has an `error` when the paragraph failed, for example when it is longer than the 8192-token context. |
+| `paragraphs` | One item per paragraph: `index`, `is_boilerplate`, `datasets`, `software`. A paragraph longer than the input budget (7040 tokens) is split by the server at sentence boundaries; its item then has `chunks`, the number of parts, and the mentions of all parts. An item has an `error` when the paragraph, or one of its parts, failed. |
 | `mentions` | The mentions of all paragraphs, deduplicated by name. |
 | `record` | The article-level record of step 2. Absent when `analyze` is `false` or when there is no mention. |
 | `duration_seconds`, `cost_usd` | Duration of the request and its GPU cost. |

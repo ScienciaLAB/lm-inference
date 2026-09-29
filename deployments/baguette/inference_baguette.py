@@ -15,6 +15,9 @@ They are downloaded once into a Modal volume.
 The tokenizer ships no chat template, so the endpoint calls the raw
 completions API with the exact training templates.
 
+A paragraph longer than the input budget is split here, on the server, at
+sentence boundaries; the mentions of its chunks are merged back into one item.
+
 Deploy (from lm-inference/):
     modal deploy deployments/baguette/inference_baguette.py
 Smoke test (from lm-inference/):
@@ -25,6 +28,7 @@ Client:
 
 import json
 import os
+import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +53,10 @@ GPU_TYPE = "L4"
 MAX_MODEL_LEN = 8192
 MAX_TOKENS = 1024
 STOP = ["<|im_end|>"]
+# Tokens left for the text of one paragraph: the context, minus the answer,
+# minus a margin for the prompt template and the special tokens.
+INPUT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_TOKENS - 128
+SENTENCE_END = re.compile(r"[.!?;:]\s+")
 # Requests sent to vLLM at the same time; vLLM batches them on the GPU.
 MAX_PARALLEL_REQUESTS = 32
 
@@ -91,6 +99,64 @@ def parse_json(text: str) -> dict:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def split_paragraph(text: str, tokenizer, budget: int = INPUT_TOKEN_BUDGET) -> list[str]:
+    """Split a paragraph into chunks of at most `budget` tokens. The cut is at
+    the last sentence end of the second half of the window, else at the last
+    whitespace, else at the token limit."""
+    chunks = []
+    rest = text.strip()
+    while rest:
+        encoding = tokenizer.encode(rest, add_special_tokens=False)
+        if len(encoding.ids) <= budget:
+            chunks.append(rest)
+            break
+        # Start of the first token beyond the budget, in characters.
+        limit = max(encoding.offsets[budget][0], 1)
+        window_start = limit // 2
+        window = rest[window_start:limit]
+        sentence_ends = list(SENTENCE_END.finditer(window))
+        if sentence_ends:
+            cut = window_start + sentence_ends[-1].end()
+        else:
+            spaces = list(re.finditer(r"\s+", window))
+            cut = window_start + spaces[-1].end() if spaces else limit
+        chunk = rest[:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+        rest = rest[cut:].strip()
+    return chunks
+
+
+def merge_chunks(index: int, outputs: list[dict]) -> dict:
+    """One item for a paragraph, from the outputs of its chunks."""
+    item = {"index": index, "is_boilerplate": None, "datasets": [], "software": []}
+    if len(outputs) > 1:
+        item["chunks"] = len(outputs)
+    errors, raw_outputs, boilerplate = [], [], []
+    for output in outputs:
+        if "error" in output:
+            errors.append(output["error"])
+            continue
+        extraction = parse_json(output["text"])
+        if not extraction:
+            errors.append("output is not a JSON object")
+            raw_outputs.append(output["text"])
+            continue
+        boilerplate.append(extraction.get("is_boilerplate"))
+        item["datasets"] += extraction.get("datasets") or []
+        item["software"] += extraction.get("software") or []
+    if boilerplate:
+        # Boilerplate only when every chunk is.
+        item["is_boilerplate"] = (
+            boilerplate[0] if len(boilerplate) == 1 else all(boilerplate)
+        )
+    if errors:
+        item["error"] = "; ".join(errors)
+    if raw_outputs:
+        item["raw_output"] = raw_outputs
+    return item
 
 
 def aggregate_mentions(per_paragraph: list[dict]) -> dict:
@@ -147,8 +213,10 @@ class BaguetteService:
     @modal.enter()
     def start_server(self):
         import httpx
+        from tokenizers import Tokenizer
 
         download_model()
+        self.tokenizer = Tokenizer.from_file(f"{MODEL_PATH}/tokenizer.json")
         print(f"Starting vLLM server for {MODEL_PATH} ...")
         self.server_process = subprocess.Popen(
             [
@@ -181,8 +249,8 @@ class BaguetteService:
             self.server_process.terminate()
 
     def _complete(self, client, prompt: str) -> dict:
-        """Greedy completion of one prompt. Never raises: a failure, such as a
-        prompt longer than the context, is reported for that prompt only."""
+        """Greedy completion of one prompt. Never raises: a failure is reported
+        for that prompt only."""
         payload = {
             "model": "model",
             "prompt": prompt,
@@ -203,26 +271,22 @@ class BaguetteService:
         import httpx
 
         with httpx.Client(timeout=600) as client:
-            # Step 1: one extraction per paragraph.
-            prompts = [extraction_prompt(p) for p in paragraphs]
+            # Step 1: one extraction per paragraph, or per chunk of a long one.
+            chunks = [split_paragraph(p, self.tokenizer) for p in paragraphs]
+            prompts = [extraction_prompt(c) for group in chunks for c in group]
             with ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
                 outputs = list(pool.map(lambda p: self._complete(client, p), prompts))
 
-            per_paragraph = []
-            for index, output in enumerate(outputs):
-                extraction = parse_json(output.get("text", ""))
-                item = {
-                    "index": index,
-                    "is_boilerplate": extraction.get("is_boilerplate"),
-                    "datasets": extraction.get("datasets") or [],
-                    "software": extraction.get("software") or [],
-                }
-                if "error" in output:
-                    item["error"] = output["error"]
-                elif not extraction:
-                    item["error"] = "output is not a JSON object"
-                    item["raw_output"] = output["text"]
-                per_paragraph.append(item)
+            per_paragraph, position = [], 0
+            for index, group in enumerate(chunks):
+                if not group:
+                    per_paragraph.append(
+                        merge_chunks(index, [{"error": "empty paragraph"}])
+                    )
+                    continue
+                group_outputs = outputs[position : position + len(group)]
+                position += len(group)
+                per_paragraph.append(merge_chunks(index, group_outputs))
 
             mentions = aggregate_mentions(per_paragraph)
             result = {
