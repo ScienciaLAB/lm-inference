@@ -15,6 +15,8 @@ This repository brings together multiple VLMs designed for:
 - Visual-text reasoning
 - Question answering on images
 
+It also holds one text model, for the extraction of dataset and software mentions.
+
 Each model is deployed as an independent **Modal app**.
 
 ---
@@ -38,6 +40,12 @@ The `lm_inference_utils.py` module is imported directly as a flat module (no pac
 | **[MinerU](./deployments/minerU)** | PDF document extraction and understanding. | https://github.com/opendatalab/MinerU |
 | **[OlmOCR](./deployments/olmo_ocr)** | OCR and text parsing model conversion of PDFs and other documents into plain text. | https://github.com/allenai/olmocr |
 | **[Qwen2.5 VL](./deployments/qwen)** | Multimodal model for reasoning, summarization, and QA over document content. | https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct |
+
+## Text Models
+
+| Model | Description | Link |
+|---|---|---|
+| **[Baguette-Software-Dataset](./deployments/baguette)** | Extraction of dataset and software mentions from the text of a paper (text, TEI or JSON input). | https://huggingface.co/buckets/dataesr/Baguette-Software-Dataset |
 
 ## Lightweight Models (CPU-targeted)
 
