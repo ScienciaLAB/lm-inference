@@ -75,6 +75,9 @@ image = (
     .apt_install("git", "wget")
     .pip_install(
         "vllm==0.11.0",
+        # vLLM 0.11.0 only requires transformers>=4.55.2, so pip takes 5.x, whose
+        # tokenizers have no all_special_tokens_extended: vLLM exits at startup.
+        "transformers==4.57.1",
         extra_options="--extra-index-url https://download.pytorch.org/whl/cu128 --no-cache-dir",
     )
     .pip_install("httpx", "fastapi[standard]", extra_options="--no-cache-dir")
