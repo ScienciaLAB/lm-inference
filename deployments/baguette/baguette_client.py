@@ -40,6 +40,7 @@ import csv
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
@@ -66,6 +67,10 @@ def parse_args():
     parser.add_argument("--threads", type=int, default=4,
                         help="In-flight requests; keep <= deployment max_containers")  # fmt: skip
     parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--retries", type=int, default=3,
+                        help="Retries of a paper after a server or network error")  # fmt: skip
+    parser.add_argument("--retry_wait", type=int, default=20,
+                        help="Seconds before the first retry; doubled at each retry")  # fmt: skip
     parser.add_argument("--no_analyze", action="store_true",
                         help="Step 1 only: skip the article-level record")  # fmt: skip
     args = parser.parse_args()
@@ -114,6 +119,26 @@ def send(args, path: Path | None):
         )
 
 
+def send_with_retries(args, path: Path | None):
+    """Send one paper, again after a server error (HTTP 5xx) or a network
+    error: a cold start, or containers of the previous version still serving
+    during a redeploy. An input error (HTTP 4xx) is not retried."""
+    for attempt in range(args.retries + 1):
+        try:
+            resp = send(args, path)
+            error = f"HTTP {resp.status_code}: {resp.text[:300]}"
+            if resp.status_code < 500:
+                return resp
+        except requests.RequestException as e:
+            error = str(e)
+        if attempt < args.retries:
+            wait = args.retry_wait * 2**attempt
+            name = path.name if path else "text"
+            print(f"{name}: {error}; retry in {wait}s", file=sys.stderr, flush=True)
+            time.sleep(wait)
+    raise RuntimeError(error)
+
+
 def run_one(args, path: Path | None) -> tuple[bool, str]:
     name = path.name if path else "text"
     row = {
@@ -122,7 +147,7 @@ def run_one(args, path: Path | None) -> tuple[bool, str]:
         "success": False,
     }  # fmt: skip
     try:
-        resp = send(args, path)
+        resp = send_with_retries(args, path)
         if resp.status_code != 200:
             raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
