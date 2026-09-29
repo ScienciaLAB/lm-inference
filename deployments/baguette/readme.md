@@ -35,6 +35,29 @@ curl -X POST https://<workspace>--baguette-software-dataset-app-extract-endpoint
   -d '{"paragraphs": ["The data was acquired using the ResearchIR MAX 4.0 software."], "analyze": true}'
 ```
 
+## Batch client
+
+`baguette_client.py` sends a folder of papers, one request per paper, and writes one JSON file per paper plus a
+CSV summary. A second run skips the papers that already succeeded.
+
+```shell
+python deployments/baguette/baguette_client.py \
+  --input_folder /path/to/tei \
+  --output_dir ./baguette_out \
+  --csv_output ./baguette_results.csv \
+  --endpoint https://<workspace>--baguette-software-dataset-app-extract-endpoint.modal.run \
+  --threads 4
+```
+
+| Input | Paragraphs |
+|---|---|
+| `.xml` | TEI from GROBID: the `<p>` elements of the abstract, body and back |
+| `.json` | a list of strings, or an object with a `paragraphs` list |
+| `.txt`, `.md` | blocks separated by blank lines |
+
+Keep `--threads` at or below `max_containers` (4). `--no_analyze` skips step 2. In the output files, each
+paragraph item also carries its `text`.
+
 ## Request
 
 | Field | Type | Description |

@@ -19,6 +19,8 @@ Deploy (from lm-inference/):
     modal deploy deployments/baguette/inference_baguette.py
 Smoke test (from lm-inference/):
     modal run deployments/baguette/inference_baguette.py
+Client:
+    python deployments/baguette/baguette_client.py --endpoint https://<ws>--baguette-software-dataset-app-extract-endpoint.modal.run ...
 """
 
 import json
