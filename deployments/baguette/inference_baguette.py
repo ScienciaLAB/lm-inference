@@ -29,6 +29,11 @@ that is not JSON. So:
 
 Deploy (from lm-inference/):
     modal deploy deployments/baguette/inference_baguette.py
+Deploy parameters, as environment variables of the deploy command:
+    BAGUETTE_GPU             GPU type, a key of lm_inference_utils (default L4)
+    BAGUETTE_MAX_CONTAINERS  GPU containers at most (default 4)
+    BAGUETTE_MAX_INPUTS      papers served at once by one container (default 1)
+    BAGUETTE_GPU=A10G BAGUETTE_MAX_INPUTS=8 modal deploy deployments/baguette/inference_baguette.py
 Smoke test (from lm-inference/):
     modal run deployments/baguette/inference_baguette.py
 Client:
@@ -59,7 +64,14 @@ MODEL_FILES = [
     "tokenizer_config.json",
     "model.safetensors",
 ]
-GPU_TYPE = "L4"
+# Deploy parameters. They are read when the app is deployed and copied into the
+# image, so that the containers see the same values.
+GPU_TYPE = os.environ.get("BAGUETTE_GPU", "L4")
+MAX_CONTAINERS = int(os.environ.get("BAGUETTE_MAX_CONTAINERS", "4"))
+MAX_INPUTS = int(os.environ.get("BAGUETTE_MAX_INPUTS", "1"))
+# Fails at deploy time on an unknown GPU type. Modal writes A100-40GB, the
+# price table A100_40GB.
+COST_PER_SECOND = get_cost_per_second(GPU_TYPE.replace("-", "_"))
 MAX_MODEL_LEN = 8192
 MAX_TOKENS = 2048
 STOP = ["<|im_end|>"]
@@ -94,6 +106,13 @@ image = (
         extra_options="--extra-index-url https://download.pytorch.org/whl/cu128 --no-cache-dir",
     )
     .pip_install("httpx", "fastapi[standard]", extra_options="--no-cache-dir")
+    .env(
+        {
+            "BAGUETTE_GPU": GPU_TYPE,
+            "BAGUETTE_MAX_CONTAINERS": str(MAX_CONTAINERS),
+            "BAGUETTE_MAX_INPUTS": str(MAX_INPUTS),
+        }
+    )
     .add_local_file("lm_inference_utils.py", "/root/lm_inference_utils.py")
 )
 
@@ -332,15 +351,15 @@ def download_model():
 
 
 @app.cls(
-    gpu=GPU_TYPE,
+    gpu=GPU_TYPE.replace("_", "-"),
     scaledown_window=300,
-    max_containers=4,
+    max_containers=MAX_CONTAINERS,
     timeout=1800,
     volumes={MODEL_VOLUME_PATH: MODEL_VOLUME},
 )
-# One article per container, as in the other deployments, so the cost of an
-# article is not divided by a sharing factor.
-@modal.concurrent(max_inputs=1)
+# By default one article per container, as in the other deployments, so the
+# cost of an article is not divided by a sharing factor.
+@modal.concurrent(max_inputs=MAX_INPUTS)
 class BaguetteService:
     @modal.enter()
     def start_server(self):
@@ -494,7 +513,10 @@ async def extract_endpoint(request: Request):
         raise HTTPException(status_code=500, detail=str(e)) from e
     duration = time.time() - t0
     result["duration_seconds"] = round(duration, 2)
-    result["cost_usd"] = round(duration * get_cost_per_second(GPU_TYPE), 6)
+    # With MAX_INPUTS > 1 the GPU is shared, and this is an upper bound.
+    result["cost_usd"] = round(duration * COST_PER_SECOND, 6)
+    result["gpu"] = GPU_TYPE
+    result["max_inputs"] = MAX_INPUTS
     return result
 
 

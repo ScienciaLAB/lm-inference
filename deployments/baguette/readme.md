@@ -21,6 +21,21 @@ From the repository root (`lm-inference/`):
 modal deploy deployments/baguette/inference_baguette.py
 ```
 
+Deploy parameters are environment variables of the deploy command:
+
+| Variable | Default | Description |
+|---|---|---|
+| `BAGUETTE_GPU` | `L4` | GPU type, a key of `GPU_COST_PER_SECOND` in `lm_inference_utils.py` |
+| `BAGUETTE_MAX_CONTAINERS` | `4` | GPU containers at most |
+| `BAGUETTE_MAX_INPUTS` | `1` | Papers served at once by one container |
+
+```shell
+BAGUETTE_GPU=A10G BAGUETTE_MAX_INPUTS=8 modal deploy deployments/baguette/inference_baguette.py
+```
+
+With `BAGUETTE_MAX_INPUTS` above 1 the papers share the GPU, and `cost_usd` is an upper bound of the cost of a
+paper. The client can then use up to `BAGUETTE_MAX_CONTAINERS` x `BAGUETTE_MAX_INPUTS` threads.
+
 Smoke test on the paragraphs of the authors' example, without deploying:
 
 ```shell
@@ -75,6 +90,7 @@ again, three times at most.
 | `mentions` | The mentions of all paragraphs, deduplicated by name. |
 | `record` | The article-level record of step 2. Absent when `analyze` is false or when there is no mention. |
 | `duration_seconds`, `cost_usd` | Duration of the request and its GPU cost. |
+| `gpu`, `max_inputs` | The deploy parameters of the service. |
 
 An input that cannot be read, or that has no paragraph, gives HTTP 400.
 
@@ -102,7 +118,7 @@ python deployments/baguette/baguette_client.py --endpoint $URL \
 |---|---|
 | `--output_dir` | Write one JSON file per paper. Without it the result is printed. Required with `--input_folder`. |
 | `--csv_output` | CSV summary. A second run skips the papers that already succeeded. |
-| `--threads` | In-flight requests. Keep it at or below `max_containers` (4). |
+| `--threads` | In-flight requests. Keep it at or below `BAGUETTE_MAX_CONTAINERS` x `BAGUETTE_MAX_INPUTS` (4 by default). |
 | `--no_analyze` | Skip step 2. |
 
 The exit code is 1 when a paper failed.
