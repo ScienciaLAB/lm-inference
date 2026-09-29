@@ -89,7 +89,6 @@ pip install -r deployments/requirements.txt
 
 Each deployment folder contains a `README.md` with example `curl` commands for its endpoints. See:
 
-- [Baguette-Software-Dataset](./deployments/baguette/readme.md)
 - [Docling](./deployments/docling/README.md)
 - [Docling Serve (Granite)](./deployments/docling-serve-granite/README.md)
 - [DoTS.OCR](./deployments/dots_ocr/readme.md)
