@@ -34,7 +34,8 @@ BAGUETTE_GPU=A10G BAGUETTE_MAX_INPUTS=8 modal deploy deployments/baguette/infere
 ```
 
 Deploy when no client is running: during a redeploy, containers of the previous version keep serving for a while,
-and a request can reach them and fail with HTTP 500. The client retries such a request.
+and a request can reach them and fail with HTTP 500. It took 5 minutes for them to stop in one case. The client
+retries such a request for about 10 minutes.
 
 With `BAGUETTE_MAX_INPUTS` above 1 the papers share the GPU, and `cost_usd` is an upper bound of the cost of a
 paper. The client can then use up to `BAGUETTE_MAX_CONTAINERS` x `BAGUETTE_MAX_INPUTS` threads.
@@ -123,6 +124,6 @@ python deployments/baguette/baguette_client.py --endpoint $URL \
 | `--csv_output` | CSV summary. A second run skips the papers that already succeeded. |
 | `--threads` | In-flight requests. Keep it at or below `BAGUETTE_MAX_CONTAINERS` x `BAGUETTE_MAX_INPUTS` (4 by default). |
 | `--no_analyze` | Skip step 2. |
-| `--retries`, `--retry_wait` | A paper is sent again after a server or network error: 3 times, after 20, 40 and 80 seconds. |
+| `--retries`, `--retry_wait` | A paper is sent again after a server or network error: 5 times, after 20, 40, 80, 160 and 320 seconds. |
 
 The exit code is 1 when a paper failed.

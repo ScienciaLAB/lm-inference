@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument("--threads", type=int, default=4,
                         help="In-flight requests; keep <= deployment max_containers")  # fmt: skip
     parser.add_argument("--timeout", type=int, default=1800)
-    parser.add_argument("--retries", type=int, default=3,
+    parser.add_argument("--retries", type=int, default=5,
                         help="Retries of a paper after a server or network error")  # fmt: skip
     parser.add_argument("--retry_wait", type=int, default=20,
                         help="Seconds before the first retry; doubled at each retry")  # fmt: skip
