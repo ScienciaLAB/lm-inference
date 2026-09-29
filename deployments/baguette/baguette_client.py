@@ -133,7 +133,8 @@ def run_one(args, path: Path | None) -> tuple[bool, str]:
         else:
             print(output)
         items = data.get("paragraphs") or []
-        failed = sum(1 for item in items if "error" in item)
+        errors = [item["error"] for item in items if "error" in item]
+        failed = len(errors)
         mentions = data.get("mentions") or {}
         dur = float(data.get("duration_seconds") or 0)
         row.update({
@@ -149,7 +150,7 @@ def run_one(args, path: Path | None) -> tuple[bool, str]:
             f"{row['software']} software in {dur:.1f}s"
         )
         if failed:
-            message += f" ({failed} paragraphs FAILED)"
+            message += f" ({failed} paragraphs FAILED: {errors[0][:100]})"
         return True, message
     except Exception as e:  # noqa: BLE001
         append_row(args.csv_output, row)

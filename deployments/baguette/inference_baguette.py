@@ -16,10 +16,16 @@ The tokenizer ships no chat template, so the endpoint calls the raw
 completions API with the exact training templates.
 
 The endpoint takes a list of paragraphs, a text, or a file (text, TEI, JSON).
-All the splitting is done here, on the server: a text is split into
-paragraphs at blank lines, and a paragraph longer than the input budget is
-split at sentence boundaries; the mentions of its chunks are merged back into
-one item.
+All the splitting is done here, on the server. The model only works on inputs
+of the size of a paragraph: on a long input it finds nothing, or writes text
+that is not JSON. So:
+  - a text is split into paragraphs at blank lines, then into pieces of at
+    most INPUT_TOKEN_BUDGET tokens, at sentence boundaries; each piece is one
+    paragraph of the response;
+  - a given paragraph (TEI, JSON) longer than the budget is split the same
+    way, and the mentions of its chunks are merged back into one item;
+  - a chunk whose output is not JSON, or is cut at MAX_TOKENS, is split in
+    two and extracted again.
 
 Deploy (from lm-inference/):
     modal deploy deployments/baguette/inference_baguette.py
@@ -55,11 +61,18 @@ MODEL_FILES = [
 ]
 GPU_TYPE = "L4"
 MAX_MODEL_LEN = 8192
-MAX_TOKENS = 1024
+MAX_TOKENS = 2048
 STOP = ["<|im_end|>"]
-# Tokens left for the text of one paragraph: the context, minus the answer,
-# minus a margin for the prompt template and the special tokens.
-INPUT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_TOKENS - 128
+# Tokens of text sent in one prompt. The context allows far more, but the model
+# does not: measured on CPU, it misses mentions from about 600 tokens, finds
+# nothing from 800, and writes text that is not JSON from 2000. On one paper
+# given as a single block, pieces of 200 tokens found the same software as its
+# TEI paragraphs (177 tokens on average); pieces of 300 and 400 found less.
+INPUT_TOKEN_BUDGET = 200
+# A failed chunk is split in two and extracted again, this many times at most,
+# and only while it has more tokens than MIN_RETRY_TOKENS.
+MAX_RETRY_DEPTH = 3
+MIN_RETRY_TOKENS = 40
 SENTENCE_END = re.compile(r"[.!?;:]\s+")
 BLANK_LINES = re.compile(r"\n[ \t\r]*\n")
 TEI = "{http://www.tei-c.org/ns/1.0}"
@@ -131,6 +144,10 @@ def read_tei(content: bytes) -> list[str]:
     return [p for p in paragraphs if p]
 
 
+def count_tokens(text: str, tokenizer) -> int:
+    return len(tokenizer.encode(text, add_special_tokens=False).ids)
+
+
 def read_paragraphs_field(paragraphs) -> list[str]:
     if not isinstance(paragraphs, list) or not all(
         isinstance(p, str) for p in paragraphs
@@ -139,27 +156,28 @@ def read_paragraphs_field(paragraphs) -> list[str]:
     return [clean(p) for p in paragraphs if p.strip()]
 
 
-def read_json(data) -> list[str]:
+def read_json(data) -> tuple[list[str], bool]:
     """Paragraphs of a JSON input: a list of strings, or an object with a
-    'paragraphs' list or a 'text'."""
+    'paragraphs' list or a 'text'. The flag tells a text from paragraphs."""
     if isinstance(data, list):
-        return read_paragraphs_field(data)
+        return read_paragraphs_field(data), False
     if isinstance(data, dict) and "paragraphs" in data:
-        return read_paragraphs_field(data["paragraphs"])
+        return read_paragraphs_field(data["paragraphs"]), False
     if isinstance(data, dict) and isinstance(data.get("text"), str):
-        return split_text(data["text"])
+        return split_text(data["text"]), True
     raise ValueError("expected 'paragraphs' (list of strings) or 'text' (string)")
 
 
-def read_file(filename: str, content: bytes) -> list[str]:
-    """Paragraphs of an uploaded file, according to its extension."""
+def read_file(filename: str, content: bytes) -> tuple[list[str], bool]:
+    """Paragraphs of an uploaded file, according to its extension. The flag
+    tells a text from paragraphs."""
     suffix = os.path.splitext(filename)[1].lower()
     if suffix == ".xml":
-        return read_tei(content)
+        return read_tei(content), False
     text = content.decode("utf-8-sig", errors="replace")
     if suffix == ".json":
         return read_json(json.loads(text))
-    return split_text(text)
+    return split_text(text), True
 
 
 def split_paragraph(text: str, tokenizer, budget: int = INPUT_TOKEN_BUDGET) -> list[str]:
@@ -197,14 +215,14 @@ def merge_chunks(index: int, outputs: list[dict]) -> dict:
         item["chunks"] = len(outputs)
     errors, raw_outputs, boilerplate = [], [], []
     for output in outputs:
-        if "error" in output:
-            errors.append(output["error"])
+        reason = failure(output)
+        if reason is not None:
+            errors.append(reason)
+            raw = output.get("raw_output") or output.get("text")
+            if raw:
+                raw_outputs.append(raw[:2000])
             continue
         extraction = parse_json(output["text"])
-        if not extraction:
-            errors.append("output is not a JSON object")
-            raw_outputs.append(output["text"])
-            continue
         boilerplate.append(extraction.get("is_boilerplate"))
         item["datasets"] += extraction.get("datasets") or []
         item["software"] += extraction.get("software") or []
@@ -218,6 +236,59 @@ def merge_chunks(index: int, outputs: list[dict]) -> dict:
     if raw_outputs:
         item["raw_output"] = raw_outputs
     return item
+
+
+def failure(output: dict) -> str | None:
+    """Why the output of a chunk cannot be used, or None."""
+    if "error" in output:
+        return output["error"]
+    if output.get("finish_reason") == "length":
+        return f"output cut at {MAX_TOKENS} tokens"
+    if not parse_json(output["text"]):
+        return "output is not a JSON object"
+    return None
+
+
+def extract_chunk(text: str, tokenizer, complete, depth: int = 0) -> list[dict]:
+    """Outputs for one chunk: one output, or, when it failed, the outputs of
+    its two halves. `complete` sends one prompt to the model."""
+    output = complete(extraction_prompt(text))
+    reason = failure(output)
+    if reason is None:
+        return [output]
+    tokens = count_tokens(text, tokenizer)
+    if depth < MAX_RETRY_DEPTH and tokens > MIN_RETRY_TOKENS:
+        halves = split_paragraph(text, tokenizer, tokens // 2 + 1)
+        if len(halves) > 1:
+            return [
+                o
+                for half in halves
+                for o in extract_chunk(half, tokenizer, complete, depth + 1)
+            ]
+    return [{"error": reason, "raw_output": output.get("text", "")}]
+
+
+def extract_paragraphs(
+    paragraphs: list[str], tokenizer, complete, is_text: bool, pool
+) -> list[dict]:
+    """Step 1. One item per paragraph; for a text, the paragraphs are its
+    pieces of at most INPUT_TOKEN_BUDGET tokens."""
+    if is_text:
+        paragraphs = [c for p in paragraphs for c in split_paragraph(p, tokenizer)]
+    groups = [split_paragraph(p, tokenizer) for p in paragraphs]
+    chunks = [c for group in groups for c in group]
+    outputs = list(pool.map(lambda c: extract_chunk(c, tokenizer, complete), chunks))
+
+    items, position = [], 0
+    for index, group in enumerate(groups):
+        group_outputs = [
+            o for chunk in outputs[position : position + len(group)] for o in chunk
+        ]
+        position += len(group)
+        item = merge_chunks(index, group_outputs or [{"error": "empty paragraph"}])
+        item["text"] = paragraphs[index]
+        items.append(item)
+    return items
 
 
 def aggregate_mentions(per_paragraph: list[dict]) -> dict:
@@ -323,37 +394,28 @@ class BaguetteService:
             r = client.post("http://localhost:8000/v1/completions", json=payload)
             if r.status_code != 200:
                 return {"error": r.text[:500]}
-            return {"text": r.json()["choices"][0]["text"]}
+            choice = r.json()["choices"][0]
+            return {"text": choice["text"], "finish_reason": choice["finish_reason"]}
         except Exception as e:
             return {"error": str(e)}
 
     @modal.method()
-    def extract(self, paragraphs: list[str], analyze: bool = True):
+    def extract(self, paragraphs: list[str], analyze: bool = True, is_text: bool = False):
         import httpx
 
         with httpx.Client(timeout=600) as client:
-            # Step 1: one extraction per paragraph, or per chunk of a long one.
-            chunks = [split_paragraph(p, self.tokenizer) for p in paragraphs]
-            prompts = [extraction_prompt(c) for group in chunks for c in group]
             with ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
-                outputs = list(pool.map(lambda p: self._complete(client, p), prompts))
-
-            per_paragraph, position = [], 0
-            for index, group in enumerate(chunks):
-                if not group:
-                    per_paragraph.append(
-                        merge_chunks(index, [{"error": "empty paragraph"}])
-                    )
-                    continue
-                group_outputs = outputs[position : position + len(group)]
-                position += len(group)
-                per_paragraph.append(merge_chunks(index, group_outputs))
-            for item in per_paragraph:
-                item["text"] = paragraphs[item["index"]]
+                per_paragraph = extract_paragraphs(
+                    paragraphs,
+                    self.tokenizer,
+                    lambda prompt: self._complete(client, prompt),
+                    is_text,
+                    pool,
+                )
 
             mentions = aggregate_mentions(per_paragraph)
             result = {
-                "num_paragraphs": len(paragraphs),
+                "num_paragraphs": len(per_paragraph),
                 "paragraphs": per_paragraph,
                 "mentions": mentions,
             }
@@ -364,11 +426,10 @@ class BaguetteService:
                     client, analysis_prompt(json.dumps(mentions, ensure_ascii=False))
                 )
                 result["record"] = parse_json(output.get("text", ""))
-                if "error" in output:
-                    result["record_error"] = output["error"]
-                elif not result["record"]:
-                    result["record_error"] = "output is not a JSON object"
-                    result["record_raw_output"] = output["text"]
+                reason = failure(output)
+                if reason is not None:
+                    result["record_error"] = reason
+                    result["record_raw_output"] = output.get("text", "")[:2000]
 
         return result
 
@@ -382,9 +443,10 @@ def as_bool(value) -> bool:
     return bool(value)
 
 
-async def read_request(request: Request) -> tuple[list[str], bool]:
-    """The paragraphs and the 'analyze' flag of a request, which is one of:
-    a multipart form with a 'file' or a 'text', a JSON body, a plain text body."""
+async def read_request(request: Request) -> tuple[list[str], bool, bool]:
+    """The paragraphs of a request, whether the input is a text, and the
+    'analyze' flag. The request is one of: a multipart form with a 'file' or a
+    'text', a JSON body, a plain text body."""
     content_type = request.headers.get("content-type", "").lower()
     if content_type.startswith("multipart/form-data"):
         form = await request.form()
@@ -392,18 +454,19 @@ async def read_request(request: Request) -> tuple[list[str], bool]:
         upload = form.get("file")
         if hasattr(upload, "read"):
             content = await upload.read()
-            return read_file(upload.filename or "document.txt", content), analyze
+            return *read_file(upload.filename or "document.txt", content), analyze
         if isinstance(form.get("text"), str):
-            return split_text(form["text"]), analyze
+            return split_text(form["text"]), True, analyze
         raise ValueError("multipart field 'file' or 'text' required")
     analyze = as_bool(request.query_params.get("analyze", True))
     if content_type.startswith("text/plain"):
         content = await request.body()
-        return split_text(content.decode("utf-8-sig", errors="replace")), analyze
+        text = content.decode("utf-8-sig", errors="replace")
+        return split_text(text), True, analyze
     body = await request.json()
     if isinstance(body, dict) and "analyze" in body:
         analyze = as_bool(body["analyze"])
-    return read_json(body), analyze
+    return *read_json(body), analyze
 
 
 @app.function(cpu=2, memory=4096, timeout=1800, max_containers=1)
@@ -416,7 +479,7 @@ async def extract_endpoint(request: Request):
     multipart form with 'file' (.txt, .md, .xml TEI, .json) or 'text'
     plain text body (Content-Type: text/plain)"""
     try:
-        paragraphs, analyze = await read_request(request)
+        paragraphs, is_text, analyze = await read_request(request)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid input: {e}") from e
     if not paragraphs:
@@ -424,7 +487,9 @@ async def extract_endpoint(request: Request):
 
     t0 = time.time()
     try:
-        result = await shared_service.extract.remote.aio(paragraphs, analyze)
+        result = await shared_service.extract.remote.aio(
+            paragraphs, analyze, is_text
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     duration = time.time() - t0

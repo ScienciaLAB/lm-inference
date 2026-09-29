@@ -58,18 +58,20 @@ The server does all the splitting:
 
 | Input | Paragraphs |
 |---|---|
-| text, `.txt`, `.md` | the blocks separated by blank lines |
+| text, `.txt`, `.md` | the blocks separated by blank lines, cut into pieces of at most 200 tokens at sentence boundaries |
 | `.xml` | TEI from GROBID: the `<p>` elements of the abstract, body and back |
 | `.json` | a list of strings, or an object with `paragraphs` or `text` |
 
-A paragraph longer than the input budget (7040 tokens) is split again at sentence boundaries, and the mentions of its
-parts are merged.
+The model only works on inputs of the size of a paragraph. On a long input it finds nothing, or writes text that is
+not JSON. So a paragraph of a TEI or JSON input longer than 200 tokens is also split, and the mentions of its parts
+are merged into one item. A part whose output is not JSON, or is cut at 2048 tokens, is split in two and extracted
+again, three times at most.
 
 ## Response
 
 | Field | Description |
 |---|---|
-| `paragraphs` | One item per paragraph: `index`, `text`, `is_boilerplate`, `datasets`, `software`. An item of a split paragraph has `chunks`, the number of parts. An item has an `error` when the paragraph, or one of its parts, failed. |
+| `paragraphs` | One item per paragraph: `index`, `text`, `is_boilerplate`, `datasets`, `software`. An item of a split paragraph has `chunks`, the number of parts. An item has an `error`, and the `raw_output` of the model, when the paragraph, or one of its parts, failed. |
 | `mentions` | The mentions of all paragraphs, deduplicated by name. |
 | `record` | The article-level record of step 2. Absent when `analyze` is false or when there is no mention. |
 | `duration_seconds`, `cost_usd` | Duration of the request and its GPU cost. |
