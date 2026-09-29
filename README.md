@@ -76,6 +76,7 @@ pip install -r deployments/requirements.txt
 
 | Model | Command |
 |---|---|
+| Baguette-Software-Dataset | `modal deploy deployments/baguette/inference_baguette.py` |
 | Docling | `modal deploy deployments/docling/docling_server_inference.py` |
 | Docling Serve (Granite) | `uv run modal deploy deployments/docling-serve-granite/docling_server_inference.py` |
 | DoTS.OCR | `modal deploy deployments/dots_ocr/inference_dots_ocr.py` |
@@ -88,6 +89,7 @@ pip install -r deployments/requirements.txt
 
 Each deployment folder contains a `README.md` with example `curl` commands for its endpoints. See:
 
+- [Baguette-Software-Dataset](./deployments/baguette/readme.md)
 - [Docling](./deployments/docling/README.md)
 - [Docling Serve (Granite)](./deployments/docling-serve-granite/README.md)
 - [DoTS.OCR](./deployments/dots_ocr/readme.md)
