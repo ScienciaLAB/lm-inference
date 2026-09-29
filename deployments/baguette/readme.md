@@ -277,13 +277,13 @@ python deployments/baguette/baguette_client.py --endpoint $URL \
   --text "The data was acquired using the ResearchIR MAX 4.0 software."
 
 # one or more files
-python deployments/baguette/baguette_client.py --endpoint $URL --input_file paper.txt
+python deployments/baguette/baguette_client.py --endpoint $URL --input-file paper.txt
 
 # a folder, with one JSON file per paper and a CSV summary
 python deployments/baguette/baguette_client.py --endpoint $URL \
-  --input_folder /path/to/papers \
-  --output_dir ./baguette_out \
-  --csv_output ./baguette_results.csv \
+  --input-folder /path/to/papers \
+  --output-dir ./baguette_out \
+  --csv-output ./baguette_results.csv \
   --threads 4
 ```
 
@@ -291,17 +291,19 @@ python deployments/baguette/baguette_client.py --endpoint $URL \
 |---|---|---|
 | `--endpoint` | | URL of the endpoint. Required. |
 | `--text` | | Text of one paper |
-| `--input_file` | | One or more files, one per paper |
-| `--input_folder` | | Folder of `.txt`, `.md`, `.xml` and `.json` files, one per paper. Subfolders are not read. |
-| `--output_dir` | | Write one JSON file per paper. Without it the result is printed. Required with `--input_folder`. |
-| `--csv_output` | | CSV summary. A second run skips the papers that already succeeded. |
+| `--input-file` | | One or more files, one per paper |
+| `--input-folder` | | Folder of `.txt`, `.md`, `.xml` and `.json` files, one per paper. Subfolders are not read. |
+| `--output-dir` | | Write one JSON file per paper. Without it the result is printed. Required with `--input-folder`. |
+| `--csv-output` | | CSV summary. A second run skips the papers that already succeeded. |
 | `--threads` | 4 | In-flight requests. Keep it at or below `BAGUETTE_MAX_CONTAINERS` x `BAGUETTE_MAX_INPUTS`. |
-| `--no_analyze` | | Skip step 2 |
+| `--no-analyze` | | Skip step 2 |
 | `--retries` | 5 | Times a paper is sent again after a server error (HTTP 5xx) or a network error. An input error (HTTP 4xx) is not retried. |
-| `--retry_wait` | 20 | Seconds before the first retry. Doubled at each retry: 20, 40, 80, 160, 320. |
+| `--retry-wait` | 20 | Seconds before the first retry. Doubled at each retry: 20, 40, 80, 160, 320. |
 | `--timeout` | 1800 | Seconds for one request |
 
-One of `--text`, `--input_file` and `--input_folder` is required.
+One of `--text`, `--input-file` and `--input-folder` is required.
+
+The options are in kebab case. The former names in snake case, such as `--input_folder`, are still accepted.
 
 **Output.** The file of a paper is `<output_dir>/<file name>.json`, for example `paper.tei.xml.json`. It holds the
 response. The progress is written on the standard error, so a printed result can be piped. The exit code is 1

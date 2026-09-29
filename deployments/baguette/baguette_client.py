@@ -6,8 +6,8 @@ reads it, splits it into paragraphs and splits the long paragraphs.
 
 One input is one paper:
     --text          a text, given on the command line
-    --input_file    one or more files
-    --input_folder  all the files of a folder, with a resumable CSV, as in
+    --input-file    one or more files
+    --input-folder  all the files of a folder, with a resumable CSV, as in
                     deployments/vlm_ocr_client.py
 
 File types, by extension:
@@ -20,17 +20,17 @@ Usage:
         --text "The data was acquired using the ResearchIR MAX 4.0 software."
 
     python deployments/baguette/baguette_client.py --endpoint <url> \
-        --input_file paper.txt
+        --input-file paper.txt
 
     python deployments/baguette/baguette_client.py --endpoint <url> \
-        --input_folder /path/to/papers \
-        --output_dir ./baguette_out \
-        --csv_output ./baguette_results.csv \
+        --input-folder /path/to/papers \
+        --output-dir ./baguette_out \
+        --csv-output ./baguette_results.csv \
         --threads 4
 
 <url> is https://<workspace>--baguette-software-dataset-app-extract-endpoint.modal.run
 
-Without --output_dir the result is printed. `--threads` should not exceed the
+Without --output-dir the result is printed. `--threads` should not exceed the
 deployment's `max_containers` (default 4): each in-flight request occupies one
 GPU container (max_inputs=1).
 """
@@ -56,26 +56,27 @@ csv_lock = Lock()
 
 
 def parse_args():
+    # Options are in kebab case. The former snake case names are still accepted.
     parser = argparse.ArgumentParser(description="Baguette client")
     parser.add_argument("--endpoint", required=True, help="Modal endpoint URL")
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--text", help="Text of one paper")
-    source.add_argument("--input_file", nargs="+", help="One file per paper")
-    source.add_argument("--input_folder", help="Folder with one file per paper")
-    parser.add_argument("--output_dir", help="One JSON file per paper; default: print")
-    parser.add_argument("--csv_output", help="CSV summary; makes the run resumable")
+    source.add_argument("--input-file", "--input_file", nargs="+", help="One file per paper")
+    source.add_argument("--input-folder", "--input_folder", help="Folder with one file per paper")
+    parser.add_argument("--output-dir", "--output_dir", help="One JSON file per paper; default: print")
+    parser.add_argument("--csv-output", "--csv_output", help="CSV summary; makes the run resumable")
     parser.add_argument("--threads", type=int, default=4,
                         help="In-flight requests; keep <= deployment max_containers")  # fmt: skip
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--retries", type=int, default=5,
                         help="Retries of a paper after a server or network error")  # fmt: skip
-    parser.add_argument("--retry_wait", type=int, default=20,
+    parser.add_argument("--retry-wait", "--retry_wait", type=int, default=20,
                         help="Seconds before the first retry; doubled at each retry")  # fmt: skip
-    parser.add_argument("--no_analyze", action="store_true",
+    parser.add_argument("--no-analyze", "--no_analyze", action="store_true",
                         help="Step 1 only: skip the article-level record")  # fmt: skip
     args = parser.parse_args()
     if args.input_folder and not args.output_dir:
-        parser.error("--input_folder requires --output_dir")
+        parser.error("--input-folder requires --output-dir")
     return args
 
 
