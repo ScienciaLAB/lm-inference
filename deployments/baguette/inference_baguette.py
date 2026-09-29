@@ -15,8 +15,11 @@ They are downloaded once into a Modal volume.
 The tokenizer ships no chat template, so the endpoint calls the raw
 completions API with the exact training templates.
 
-A paragraph longer than the input budget is split here, on the server, at
-sentence boundaries; the mentions of its chunks are merged back into one item.
+The endpoint takes a list of paragraphs, a text, or a file (text, TEI, JSON).
+All the splitting is done here, on the server: a text is split into
+paragraphs at blank lines, and a paragraph longer than the input budget is
+split at sentence boundaries; the mentions of its chunks are merged back into
+one item.
 
 Deploy (from lm-inference/):
     modal deploy deployments/baguette/inference_baguette.py
@@ -31,6 +34,7 @@ import os
 import re
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
 import modal
@@ -57,6 +61,8 @@ STOP = ["<|im_end|>"]
 # minus a margin for the prompt template and the special tokens.
 INPUT_TOKEN_BUDGET = MAX_MODEL_LEN - MAX_TOKENS - 128
 SENTENCE_END = re.compile(r"[.!?;:]\s+")
+BLANK_LINES = re.compile(r"\n[ \t\r]*\n")
+TEI = "{http://www.tei-c.org/ns/1.0}"
 # Requests sent to vLLM at the same time; vLLM batches them on the GPU.
 MAX_PARALLEL_REQUESTS = 32
 
@@ -99,6 +105,58 @@ def parse_json(text: str) -> dict:
     except Exception:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def clean(text: str) -> str:
+    return " ".join(text.split())
+
+
+def split_text(text: str) -> list[str]:
+    """Paragraphs of a plain text: the blocks separated by blank lines."""
+    return [clean(block) for block in BLANK_LINES.split(text) if block.strip()]
+
+
+def read_tei(content: bytes) -> list[str]:
+    """Paragraphs of a TEI document (GROBID): the <p> elements of the abstract,
+    body and back."""
+    root = ET.fromstring(content)
+    paragraphs = []
+    for section in (f".//{TEI}abstract", f"./{TEI}text"):
+        for parent in root.iterfind(section):
+            for p in parent.iter(f"{TEI}p"):
+                paragraphs.append(clean("".join(p.itertext())))
+    return [p for p in paragraphs if p]
+
+
+def read_paragraphs_field(paragraphs) -> list[str]:
+    if not isinstance(paragraphs, list) or not all(
+        isinstance(p, str) for p in paragraphs
+    ):
+        raise ValueError("'paragraphs' must be a list of strings")
+    return [clean(p) for p in paragraphs if p.strip()]
+
+
+def read_json(data) -> list[str]:
+    """Paragraphs of a JSON input: a list of strings, or an object with a
+    'paragraphs' list or a 'text'."""
+    if isinstance(data, list):
+        return read_paragraphs_field(data)
+    if isinstance(data, dict) and "paragraphs" in data:
+        return read_paragraphs_field(data["paragraphs"])
+    if isinstance(data, dict) and isinstance(data.get("text"), str):
+        return split_text(data["text"])
+    raise ValueError("expected 'paragraphs' (list of strings) or 'text' (string)")
+
+
+def read_file(filename: str, content: bytes) -> list[str]:
+    """Paragraphs of an uploaded file, according to its extension."""
+    suffix = os.path.splitext(filename)[1].lower()
+    if suffix == ".xml":
+        return read_tei(content)
+    text = content.decode("utf-8-sig", errors="replace")
+    if suffix == ".json":
+        return read_json(json.loads(text))
+    return split_text(text)
 
 
 def split_paragraph(text: str, tokenizer, budget: int = INPUT_TOKEN_BUDGET) -> list[str]:
@@ -287,6 +345,8 @@ class BaguetteService:
                 group_outputs = outputs[position : position + len(group)]
                 position += len(group)
                 per_paragraph.append(merge_chunks(index, group_outputs))
+            for item in per_paragraph:
+                item["text"] = paragraphs[item["index"]]
 
             mentions = aggregate_mentions(per_paragraph)
             result = {
@@ -313,30 +373,55 @@ class BaguetteService:
 shared_service = BaguetteService()
 
 
+def as_bool(value) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "")
+    return bool(value)
+
+
+async def read_request(request: Request) -> tuple[list[str], bool]:
+    """The paragraphs and the 'analyze' flag of a request, which is one of:
+    a multipart form with a 'file' or a 'text', a JSON body, a plain text body."""
+    content_type = request.headers.get("content-type", "").lower()
+    if content_type.startswith("multipart/form-data"):
+        form = await request.form()
+        analyze = as_bool(form.get("analyze", True))
+        upload = form.get("file")
+        if hasattr(upload, "read"):
+            content = await upload.read()
+            return read_file(upload.filename or "document.txt", content), analyze
+        if isinstance(form.get("text"), str):
+            return split_text(form["text"]), analyze
+        raise ValueError("multipart field 'file' or 'text' required")
+    analyze = as_bool(request.query_params.get("analyze", True))
+    if content_type.startswith("text/plain"):
+        content = await request.body()
+        return split_text(content.decode("utf-8-sig", errors="replace")), analyze
+    body = await request.json()
+    if isinstance(body, dict) and "analyze" in body:
+        analyze = as_bool(body["analyze"])
+    return read_json(body), analyze
+
+
 @app.function(cpu=2, memory=4096, timeout=1800, max_containers=1)
 @modal.concurrent(max_inputs=10)
 @modal.fastapi_endpoint(method="POST")
 async def extract_endpoint(request: Request):
-    """Body: {"paragraphs": ["...", "..."], "analyze": true}"""
+    """One paper per request, as one of:
+    JSON {"paragraphs": ["...", "..."], "analyze": true}
+    JSON {"text": "...", "analyze": true}
+    multipart form with 'file' (.txt, .md, .xml TEI, .json) or 'text'
+    plain text body (Content-Type: text/plain)"""
     try:
-        body = await request.json()
+        paragraphs, analyze = await read_request(request)
     except Exception as e:
-        raise HTTPException(status_code=400, detail="JSON body required") from e
-    paragraphs = body.get("paragraphs") if isinstance(body, dict) else None
-    if (
-        not isinstance(paragraphs, list)
-        or not paragraphs
-        or not all(isinstance(p, str) for p in paragraphs)
-    ):
-        raise HTTPException(
-            status_code=400, detail="'paragraphs' must be a non-empty list of strings"
-        )
+        raise HTTPException(status_code=400, detail=f"invalid input: {e}") from e
+    if not paragraphs:
+        raise HTTPException(status_code=400, detail="no paragraph found in the input")
 
     t0 = time.time()
     try:
-        result = await shared_service.extract.remote.aio(
-            paragraphs, bool(body.get("analyze", True))
-        )
+        result = await shared_service.extract.remote.aio(paragraphs, analyze)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     duration = time.time() - t0
