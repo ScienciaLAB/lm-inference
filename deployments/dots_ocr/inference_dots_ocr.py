@@ -1,6 +1,7 @@
 import modal
 import tempfile
 import os
+import threading
 import subprocess
 import json
 from pathlib import Path
@@ -50,19 +51,40 @@ image = (
 )
 
 
+
+# Documents served concurrently per GPU container. The campaign of the paper's
+# cost table ran at 1 (one document per A100, pages batched only within the
+# document). The re-measurement for the EACL response runs at 8, so that the
+# vLLM server batches page requests across documents, which is what the
+# vendors' throughput figures assume. Override at deploy time: DOCS_PER_GPU=<n>.
+DOCS_PER_GPU = int(os.environ.get("DOCS_PER_GPU", "8"))
+
 app = modal.App("dots-ocr-vllm-official-app", image=image)
 
 
 # Modal class to manage the vLLM server lifecycle
-@app.cls(gpu="A100-40GB", scaledown_window=300, max_containers=4, min_containers=1)
-# One doc per container so N concurrent (async-dispatched) requests fan out to N
-# GPUs instead of packing onto one; pre-warm with min_containers=max_containers
-# to avoid the cold-start ramp on a batch.
-@modal.concurrent(max_inputs=1)
+@app.cls(gpu="A100-40GB", scaledown_window=300, max_containers=1, min_containers=1, timeout=1800)
+# One GPU container with DOCS_PER_GPU documents in flight: the parser processes
+# run side by side and the single vLLM server batches their page requests.
+# With max_containers=1 the billed GPU time is this container's span (see
+# [GPU_SPAN] in the logs). The paper's campaign used max_inputs=1 and
+# max_containers=4, one document per GPU.
+@modal.concurrent(max_inputs=DOCS_PER_GPU)
 class DotsOCRService:
     @modal.enter()  # Runs once when the container starts
     def start_server(self):
         print("Starting vLLM server for dots.ocr...")
+        # GPU-time accounting for the concurrency re-measurement: with one
+        # container (max_containers=1) the billed GPU time is this container's
+        # span, so the span from the first document's start to the last
+        # document's end, divided by the documents served, is the GPU-seconds
+        # per document that the per-request latency no longer measures.
+        self._t0 = time.time()
+        self._ready = None
+        self._docs = 0
+        self._first = None
+        self._last = None
+        self._lock = threading.Lock()
 
         model_path = "/dots_ocr_repo/weights/DotsMOCR"  # download_model.py saves here regardless of model name
 
@@ -103,6 +125,7 @@ class DotsOCRService:
             try:
                 resp = httpx.get("http://localhost:8000/health", timeout=2)
                 if resp.status_code == 200:
+                    self._ready = time.time()
                     print("✅ vLLM server is ready.")
                     return
             except Exception:
@@ -135,6 +158,7 @@ class DotsOCRService:
     ):
         import shutil
 
+        t_start = time.time()
         os.chdir("/dots_ocr_repo")
         os.environ["VLLM_ENDPOINT"] = "http://localhost:8000"
         os.environ["VLLM_MODEL_NAME"] = "model"
@@ -228,13 +252,25 @@ class DotsOCRService:
         except Exception as e:
             print(f"Unexpected error in parse_document: {e}")
             raise
+        finally:
+            with self._lock:
+                self._docs += 1
+                self._first = self._first or t_start
+                self._last = time.time()
+                span = self._last - self._first
+                startup = (self._ready or self._t0) - self._t0
+                print(
+                    f"[GPU_SPAN] docs={self._docs} active_span_s={span:.1f} "
+                    f"startup_s={startup:.1f} gpu_s_per_doc={span / self._docs:.2f} "
+                    f"docs_per_gpu={DOCS_PER_GPU}"
+                )
 
 
 shared_service = DotsOCRService()
 
 
 @app.function(cpu=2, memory=4096, timeout=1000, max_containers=1)
-@modal.concurrent(max_inputs=10)
+@modal.concurrent(max_inputs=64)
 @modal.fastapi_endpoint(method="POST")
 async def parse_document_endpoint(request: Request):
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -270,10 +306,14 @@ async def parse_document_endpoint(request: Request):
         cost_per_sec = get_cost_per_second("A100_40GB")
         NUM_GPUS_USED = 1
 
-        total_cost = duration * cost_per_sec * NUM_GPUS_USED
+        # With DOCS_PER_GPU documents sharing the GPU, latency x rate is no
+        # longer the cost of a document; the nominal share below is kept for
+        # the client CSVs, the billing basis is the container span ([GPU_SPAN]).
+        total_cost = duration * cost_per_sec * NUM_GPUS_USED / DOCS_PER_GPU
         cost_result = {
             "duration_seconds": round(duration, 2),
             "cost_usd": round(total_cost, 6),
+            "cost_basis": f"latency x A100-40GB rate / {DOCS_PER_GPU} docs per GPU (nominal)",
         }
 
         print(
